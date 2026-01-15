@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% block title %}Home{% endblock %}
+
+{% block content %}
+<h1>{{ group.name }}</h1>
+<p style="color: #666; margin-bottom: 2rem;">Group Code: <strong>{{ group.code }}</strong></p>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem;">
+    <a href="{{ url_for('chores') }}" class="card" style="text-decoration: none; color: inherit;">
+        <h2>🧹 Chores</h2>
+        <p style="color: #666;">Manage household tasks and assignments</p>
+    </a>
+    
+    <a href="{{ url_for('groceries') }}" class="card" style="text-decoration: none; color: inherit;">
+        <h2>🛒 Groceries</h2>
+        <p style="color: #666;">Shared shopping list for the household</p>
+    </a>
+</div>
+
+<div class="card mt-2">
+    <h2>👥 Members</h2>
+    <ul style="list-style: none; padding: 0;">
+        {% for user in group.users %}
+        <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
+            {{ user.email }}
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endblock %}

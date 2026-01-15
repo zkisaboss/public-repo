@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block title %}Chores{% endblock %}
+
+{% block content %}
+<h1>🧹 Chores</h1>
+<p style="color: #666; margin-bottom: 2rem;">{{ group.name }}</p>
+
+<div class="card">
+    <p style="color: #888; text-align: center; padding: 2rem;">
+        Chore tracking coming soon!<br>
+        <small>Add chores, assign to members, track completion</small>
+    </p>
+</div>
+
+<a href="{{ url_for('home') }}" class="btn btn-secondary mt-2">← Back to Home</a>
+{% endblock %}
