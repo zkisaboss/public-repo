@@ -4,3 +4,4 @@ python-dotenv
 Pillow
 google-cloud-documentai
 werkzeug
+psycopg2-binary

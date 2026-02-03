@@ -28,17 +28,32 @@ import tempfile
 import sys
 
 # Debug logging
+# Debug logging
 print(f"VERCEL ENV DETECTED: {os.environ.get('VERCEL')}", file=sys.stderr)
 
-if os.environ.get('VERCEL'):
+# Database Configuration
+# Priority:
+# 1. Environment Variable (POSTGRES_URL or DATABASE_URL)
+# 2. Vercel Fallback (Ephemeral SQLite in /tmp)
+# 3. Local Fallback (SQLite in instance folder)
+
+database_url = os.environ.get('POSTGRES_URL') or os.environ.get('DATABASE_URL')
+
+if database_url:
+    # Fix incompatible postgres:// scheme for SQLAlchemy if present
+    if database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    print(f"Using configured database: {database_url.split('@')[0]}...", file=sys.stderr)
+elif os.environ.get('VERCEL'):
     # Use /tmp for ephemeral database on Vercel
     tmp_dir = tempfile.gettempdir()
     db_path = os.path.join(tmp_dir, 'household.db')
     print(f"Using ephemeral database at: {db_path}", file=sys.stderr)
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', f'sqlite:///{db_path}')
+    app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
 else:
     # Local development
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///household.db')
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///household.db'
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
