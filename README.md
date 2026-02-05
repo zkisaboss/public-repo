@@ -19,16 +19,8 @@ This project is deployed on [Vercel](https://vercel.com).
 ### Environment Variables
 For the application to function correctly, the following environment variables must be set in Vercel:
 -   `SECRET_KEY`: Random string for session security.
--   `DATABASE_URL`: `sqlite:///household.db` (Note: Vercel uses `/tmp/household.db` automatically).
--   `GOOGLE_CLOUD_PROJECT`: Your GCP Project ID.
--   `DOCUMENT_AI_LOCATION`: e.g., `us`.
--   `DOCUMENT_AI_PROCESSOR_ID`: Your Processor ID.
--   `GOOGLE_CREDENTIALS_JSON`: The **content** of your Service Account JSON key.
-
-### ⚠️ Database Persistence Note
-This application currently uses **SQLite**. On Vercel's serverless environment, the filesystem (and thus the database) is **ephemeral**.
--   **Data will reset** frequently (on redeploy or cold start).
--   **Recommendation**: For a production application, migrate to a hosted database like Vercel Postgres, Supabase, or Neon.
+-   `POSTGRES_URL`: Connection string for the Vercel Postgres database.
+-   `ANTHROPIC_API_KEY`: API Key for Anthropic Claude (used for receipt scanning).
 
 ## Local Development
 
@@ -49,12 +41,12 @@ This application currently uses **SQLite**. On Vercel's serverless environment, 
     Create a `.env` file in the root directory:
     ```bash
     SECRET_KEY=dev-key
-    DATABASE_URL=sqlite:///household.db
-    # Add Google Cloud credentials here
+    POSTGRES_URL=postgresql://user:password@host:port/database
+    ANTHROPIC_API_KEY=your_key_here
     ```
 
 4.  **Run the App**:
     ```bash
     python3 app.py
     ```
-    Visit `http://127.0.0.1:5000`.
+    Visit `http://127.0.0.1:5001`.

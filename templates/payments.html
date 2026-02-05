@@ -1,18 +1,14 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Payments</title>
-    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body>
-<div class="container">
-    <h1 class="my-4">Payments</h1>
+{% extends 'base.html' %}
+{% block title %}Payments{% endblock %}
 
-    <p>This is the payments page.</p>
+{% block content %}
+<header class="page-header">
+    <h1>Payments</h1>
+    <p class="subtitle">Manage household expenses</p>
+</header>
 
-    <a href="/groceries" class="btn btn-secondary">Back to Groceries</a>
+<div class="card text-center">
+    <p class="hint">This feature is coming soon.</p>
+    <a href="{{ url_for('groceries') }}" class="btn btn-secondary mt-1">Back to Groceries</a>
 </div>
-</body>
-</html>
+{% endblock %}
