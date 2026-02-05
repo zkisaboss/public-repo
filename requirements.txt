@@ -2,6 +2,6 @@ flask
 flask_sqlalchemy
 python-dotenv
 Pillow
-google-cloud-documentai
+anthropic
 werkzeug
 psycopg2-binary

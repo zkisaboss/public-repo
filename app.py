@@ -10,11 +10,11 @@ from PIL import Image
 import io
 import re
 import base64
-
 import os
 from dotenv import load_dotenv
-
-
+import anthropic
+import json
+import sys
 
 # Load environment variables from .env file
 load_dotenv()
@@ -22,38 +22,18 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 
-# Configure Database URI
-# Configure Database URI
-import tempfile
-import sys
-
-# Debug logging
-# Debug logging
-print(f"VERCEL ENV DETECTED: {os.environ.get('VERCEL')}", file=sys.stderr)
-
 # Database Configuration
-# Priority:
-# 1. Environment Variable (POSTGRES_URL or DATABASE_URL)
-# 2. Vercel Fallback (Ephemeral SQLite in /tmp)
-# 3. Local Fallback (SQLite in instance folder)
-
 database_url = os.environ.get('POSTGRES_URL') or os.environ.get('DATABASE_URL')
 
-if database_url:
-    # Fix incompatible postgres:// scheme for SQLAlchemy if present
-    if database_url.startswith('postgres://'):
-        database_url = database_url.replace('postgres://', 'postgresql://', 1)
-    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
-    print(f"Using configured database: {database_url.split('@')[0]}...", file=sys.stderr)
-elif os.environ.get('VERCEL'):
-    # Use /tmp for ephemeral database on Vercel
-    tmp_dir = tempfile.gettempdir()
-    db_path = os.path.join(tmp_dir, 'household.db')
-    print(f"Using ephemeral database at: {db_path}", file=sys.stderr)
-    app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
-else:
-    # Local development
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///household.db'
+if not database_url:
+    raise ValueError("Missing POSTGRES_URL or DATABASE_URL environment variable")
+
+# Fix incompatible postgres:// scheme for SQLAlchemy if present
+if database_url.startswith('postgres://'):
+    database_url = database_url.replace('postgres://', 'postgresql://', 1)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+print(f"Using database: {database_url.split('@')[0]}...", file=sys.stderr)
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
@@ -251,66 +231,84 @@ def groceries():
 
 
 # =============================================================================
-# Grocery Receipt OCR - Google Document AI
+# Grocery Receipt OCR - Anthropic Claude
 # =============================================================================
 
-from google.cloud import documentai_v1 as documentai
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
 
-# Google Cloud configuration from environment variables
-GOOGLE_CLOUD_PROJECT = os.environ.get('GOOGLE_CLOUD_PROJECT')
-DOCUMENT_AI_LOCATION = os.environ.get('DOCUMENT_AI_LOCATION', 'us')
-DOCUMENT_AI_PROCESSOR_ID = os.environ.get('DOCUMENT_AI_PROCESSOR_ID')
-
-# Credentials path - check
-if credentials_path := os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
-    pass
-
-def get_documentai_client():
-    return documentai.DocumentProcessorServiceClient()
-
-
-def parse_receipt_with_document_ai(image_bytes):
-    """Parse receipt image using Google Document AI Expense Parser."""
-    if not all([GOOGLE_CLOUD_PROJECT, DOCUMENT_AI_PROCESSOR_ID]):
-        raise ValueError("Missing required Google Cloud configuration")
+def parse_receipt_with_claude(image_bytes):
+    """Parse receipt image using Anthropic Claude."""
+    if not ANTHROPIC_API_KEY:
+        raise ValueError("Missing ANTHROPIC_API_KEY environment variable")
     
-    client = get_documentai_client()
-    processor_name = client.processor_path(
-        GOOGLE_CLOUD_PROJECT, DOCUMENT_AI_LOCATION, DOCUMENT_AI_PROCESSOR_ID
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    
+    # Encode image to base64
+    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+    
+    prompt = """
+    Extract grocery items as JSON: {"items": [...]}
+    
+    Each item:
+    - "name": item name only (exclude codes/quantities)
+    - "amt": quantity (parse from EA/QTY/@, default 1)
+    - "price": line total (not unit price)
+    
+    Ignore tax/subtotals. JSON only.
+    """
+
+    # Model selection
+    CLAUDE_HAIKU = "claude-haiku-4-5-20251001"    # $1/$5 - Fastest, cheapest
+    CLAUDE_SONNET = "claude-sonnet-4-5-20250929"  # $3/$15 - Balanced (recommended)
+    CLAUDE_OPUS = "claude-opus-4-5-20251101"      # $5/$25 - Highest accuracy
+
+    message = client.messages.create(
+        model=CLAUDE_SONNET,
+        max_tokens=2048,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": image_base64,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": prompt
+                    }
+                ],
+            }
+        ],
     )
 
-    raw_document = documentai.RawDocument(content=image_bytes, mime_type="image/jpeg")
-    request = documentai.ProcessRequest(name=processor_name, raw_document=raw_document)
-
-    result = client.process_document(request=request)
-    document = result.document
-
-    items = []
-
-    # Extract line items from the expense document
-    for entity in document.entities:
-        if entity.type_ == "line_item":
-            item = {'name': '', 'quantity': 1, 'price': None}
-
-            for prop in entity.properties:
-                if prop.type_ == "line_item/description":
-                    item['name'] = prop.mention_text.strip()
-                elif prop.type_ == "line_item/quantity":
-                    try:
-                        item['quantity'] = int(float(prop.mention_text.strip()))
-                    except (ValueError, TypeError):
-                        item['quantity'] = 1
-                elif prop.type_ == "line_item/amount":
-                    try:
-                        price_text = re.sub(r'[^\d.]', '', prop.mention_text)
-                        item['price'] = float(price_text)
-                    except (ValueError, TypeError):
-                        item['price'] = None
-
-            if item['name']:
-                items.append(item)
-
-    return items
+    # Extract JSON from response
+    response_text = message.content[0].text
+    try:
+        # Simple extraction in case Claude adds some text
+        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        if json_match:
+            data = json.loads(json_match.group())
+            raw_items = data.get('items', [])
+            
+            # Map 'amt' back to 'quantity' for internal app consistency
+            items = []
+            for item in raw_items:
+                items.append({
+                    'name': item.get('name', ''),
+                    'quantity': item.get('amt', 1),
+                    'price': item.get('price')
+                })
+            return items
+        else:
+            return []
+    except Exception as e:
+        print(f"Error parsing Claude response: {e}", file=sys.stderr)
+        return []
 
 
 def extract_image_from_request():
@@ -356,7 +354,7 @@ def upload_receipt():
             return jsonify({'error': 'No image provided'}), 400
 
         image_bytes = ensure_jpeg_bytes(image_bytes)
-        items = parse_receipt_with_document_ai(image_bytes)
+        items = parse_receipt_with_claude(image_bytes)
 
         return jsonify({'items': items})
 
