@@ -119,6 +119,33 @@ class ChoreCompletion(db.Model):
     user = db.relationship('User', backref='chore_completions')
 
 
+# Add these models after ChoreCompletion class
+
+class Expense(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    description = db.Column(db.String(200), nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    paid_by_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    group_id = db.Column(db.Integer, db.ForeignKey('group.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    paid_by = db.relationship('User', backref='expenses_paid')
+    splits = db.relationship('ExpenseSplit', backref='expense', lazy=True, cascade="all, delete-orphan")
+
+
+class ExpenseSplit(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    expense_id = db.Column(db.Integer, db.ForeignKey('expense.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    percentage = db.Column(db.Float, nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    
+    # Relationship
+    user = db.relationship('User', backref='expense_splits')
+
+
 # Auth helpers
 def login_required(f):
     @wraps(f)
@@ -370,6 +397,15 @@ def groceries():
     return render_template('groceries.html', group=user.group, items=items)
 
 
+@app.route('/expenses')
+@login_required
+def expenses():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for('login'))
+    if redirect_response := require_group(user):
+        return redirect_response
+    return render_template('expenses.html', group=user.group)
 
 # Grocery Receipt OCR - Anthropic Claude
 
@@ -710,6 +746,145 @@ def payments():
         return redirect_response
     return render_template("payments.html", group=user.group)
 
+
+# ===== Expenses API Routes =====
+
+@app.route('/api/expenses', methods=['GET'])
+@login_required
+def get_expenses():
+    """Get all expenses for the household."""
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    expenses = Expense.query.filter_by(group_id=user.group_id).order_by(
+        Expense.date.desc(), Expense.created_at.desc()
+    ).all()
+    
+    result = []
+    for expense in expenses:
+        result.append({
+            'expenseId': expense.id,
+            'description': expense.description,
+            'amount': float(expense.amount),
+            'date': expense.date.isoformat(),
+            'paidBy': {
+                'user_id': expense.paid_by_user_id,
+                'name': expense.paid_by.email.split('@')[0]
+            },
+            'splits': [{
+                'user_id': s.user_id,
+                'user_name': s.user.email.split('@')[0],
+                'percentage': float(s.percentage),
+                'amount': float(s.amount)
+            } for s in expense.splits]
+        })
+    
+    return jsonify(result)
+
+
+@app.route('/api/expenses', methods=['POST'])
+@login_required
+def create_expense():
+    """Create a new expense with splits."""
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.get_json()
+    
+    # Verify paid_by user belongs to group
+    paid_by_user = User.query.filter_by(
+        id=data['paidByUserId'], 
+        group_id=user.group_id
+    ).first()
+    
+    if not paid_by_user:
+        return jsonify({'error': 'Invalid user'}), 400
+    
+    # Parse date string to date object
+    expense_date = date.fromisoformat(data['date'])
+    
+    # Create expense
+    expense = Expense(
+        description=data['description'],
+        amount=float(data['amount']),
+        date=expense_date,
+        paid_by_user_id=data['paidByUserId'],
+        group_id=user.group_id
+    )
+    
+    db.session.add(expense)
+    db.session.flush()  # Get expense.id
+    
+    # Create splits
+    for split in data['splits']:
+        split_amount = float(data['amount']) * (float(split['percentage']) / 100.0)
+        expense_split = ExpenseSplit(
+            expense_id=expense.id,
+            user_id=split['user_id'],
+            percentage=float(split['percentage']),
+            amount=split_amount
+        )
+        db.session.add(expense_split)
+    
+    db.session.commit()
+    return jsonify({'expenseId': expense.id}), 201
+
+
+@app.route('/api/expenses/<int:expense_id>', methods=['PUT'])
+@login_required
+def update_expense(expense_id):
+    """Update an expense (does not change splits)."""
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    expense = Expense.query.filter_by(
+        id=expense_id, 
+        group_id=user.group_id
+    ).first()
+    
+    if not expense:
+        return jsonify({'error': 'Expense not found'}), 404
+    
+    data = request.get_json()
+    old_amount = float(expense.amount)
+    
+    # Update expense
+    expense.description = data['description']
+    expense.amount = float(data['amount'])
+    expense.date = date.fromisoformat(data['date'])
+    expense.paid_by_user_id = data['paidByUserId']
+    
+    # Recalculate split amounts if amount changed
+    if old_amount != float(data['amount']):
+        for split in expense.splits:
+            split.amount = float(data['amount']) * (float(split.percentage) / 100.0)
+    
+    db.session.commit()
+    return jsonify({'success': True})
+
+
+@app.route('/api/expenses/<int:expense_id>', methods=['DELETE'])
+@login_required
+def delete_expense(expense_id):
+    """Delete an expense and its splits."""
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    expense = Expense.query.filter_by(
+        id=expense_id, 
+        group_id=user.group_id
+    ).first()
+    
+    if not expense:
+        return jsonify({'error': 'Expense not found'}), 404
+    
+    db.session.delete(expense)
+    db.session.commit()
+    return jsonify({'success': True})
 
 
 # Init
