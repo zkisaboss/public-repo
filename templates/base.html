@@ -429,6 +429,16 @@
             margin-bottom: 1rem;
             padding-bottom: 1rem;
             border-bottom: 1px solid var(--border);
+            align-items: center;
+            /* Fix vertical centering */
+        }
+
+        .form-row input {
+            border-radius: var(--radius-pill);
+            /* Fix rounded format */
+            height: 48px;
+            /* Standardize height */
+            line-height: normal;
         }
 
         .form-row input[type="text"] {
@@ -442,8 +452,16 @@
 
         .form-row button {
             width: auto;
-            font-size: 1.2rem;
-            padding: 0.5rem 1rem;
+            font-size: 1.5rem;
+            padding: 0 1.5rem;
+            height: 48px;
+            /* Match input height */
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            padding-bottom: 4px;
+            /* Visually center the plus sign */
         }
 
         /* Input Group (e.g. Price Field) */
@@ -824,7 +842,7 @@
         <div class="flex-row items-center gap-1">
             <!-- Simple text logo or icon -->
             <a href="{{ url_for('home') }}" class="nav-brand" style="margin-left:0; color:var(--primary);">
-                <span style="font-size:1.5rem;">�</span> RoomSync
+                <span style="font-size:1.5rem;">RoomSync</span>
             </a>
         </div>
         <div>
