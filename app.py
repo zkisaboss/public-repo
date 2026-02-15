@@ -29,11 +29,13 @@ class Payment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
+    expense_id = db.Column(db.Integer, db.ForeignKey('expenses.id'), nullable=True)
+
     amount_cents = db.Column(db.Integer, nullable=False)
     currency = db.Column(db.String(3), default='usd')
     status = db.Column(db.String(20), default='pending')
-    stripe_session_id = db.Column(db.String(255))
-    stripe_payment_intent_id = db.Column(db.String(255))
+    stripe_session_id = db.Column(db.String(255), unique=True, nullable=False)
+    stripe_payment_intent_id = db.Column(db.String(255), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class GroceryItem(db.Model):
@@ -56,6 +58,8 @@ class Expense(db.Model):
     group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     splits = relationship('ExpenseSplit', backref='expense', cascade="all, delete-orphan")
+    payments = relationship('Payment', backref='expense', lazy=True)
+
 
 class ExpenseSplit(db.Model):
     __tablename__ = 'expense_splits'
@@ -151,6 +155,7 @@ def get_users():
         {'user_id': u.id, 'name': u.email.split('@')[0]} 
         for u in users
     ])
+
 
 @app.route('/api/chores', methods=['GET'])
 @login_required
@@ -748,15 +753,24 @@ def get_expenses():
             'paidBy': {
                 'user_id': expense.paid_by_user_id,
                 'name': expense.paid_by.email.split('@')[0]
-            },
-            'splits': [{
+             },
+             'splits': [{
                 'user_id': s.user_id,
                 'user_name': s.user.email.split('@')[0],
                 'percentage': float(s.percentage),
                 'amount': float(s.amount)
-            } for s in expense.splits]
+            } for s in expense.splits],
+
+            'payments': [{
+                'payment_id': p.id,
+                'user_id': p.user_id,
+                'amount_cents': p.amount_cents,
+                'status': p.status,
+                'transaction_id': p.stripe_session_id,
+                'created_at': p.created_at.isoformat() if p.created_at else None
+            } for p in expense.payments]
         })
-    
+
     return jsonify(result)
 
 
@@ -862,6 +876,55 @@ def delete_expense(expense_id):
     db.session.delete(expense)
     db.session.commit()
     return jsonify({'success': True})
+
+@app.route("/api/expenses/<int:expense_id>/pay", methods=["POST"])
+@login_required
+def pay_expense(expense_id):
+    """Create a payment record for the current user for this expense."""
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    # Make sure expense is in the same group
+    expense = Expense.query.filter_by(id=expense_id, group_id=user.group_id).first()
+    if not expense:
+        return jsonify({"error": "Expense not found"}), 404
+
+    # Find this user's split for the expense
+    split = ExpenseSplit.query.filter_by(expense_id=expense.id, user_id=user.id).first()
+    if not split:
+        return jsonify({"error": "You are not part of this expense"}), 403
+
+    amount_cents = int(round(float(split.amount) * 100))
+
+    # Create payment record (manual / non-stripe for now)
+    payment = Payment(
+        user_id=user.id,
+        group_id=user.group_id,
+        expense_id=expense.id,
+        amount_cents=amount_cents,
+        currency="usd",
+        status="completed",
+        stripe_session_id=f"manual-exp{expense.id}-u{user.id}",
+    )
+
+    db.session.add(payment)
+    db.session.commit()
+
+    return jsonify({
+        "success": True,
+        "payment": {
+            "payment_id": payment.id,
+            "expense_id": payment.expense_id,
+            "amount_cents": payment.amount_cents,
+            "status": payment.status,
+            "transaction_id": payment.stripe_session_id,
+            "created_at": payment.created_at.isoformat() if payment.created_at else None
+        }
+    }), 201
+
+
+
 
 
 # Init
