@@ -716,7 +716,7 @@ def modify_grocery(item_id):
 
 # Chores API Routes are now in chores.py
 
-
+# ===== Payment API Routes =====
 
 @app.route("/payments")
 @login_required
@@ -772,6 +772,49 @@ def get_expenses():
         })
 
     return jsonify(result)
+
+
+
+@app.route("/api/payments", methods=["GET"])
+@login_required
+def get_payments():
+    """Return payment history for the current user's group."""
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    payments = (
+        Payment.query
+        .filter_by(group_id=user.group_id)
+        .order_by(Payment.created_at.desc())
+        .all()
+    )
+
+    result = []
+    for p in payments:
+        payer = User.query.get(p.user_id)
+
+        status = (p.status or "pending").lower()
+        if status in ["paid", "succeeded", "success"]:
+            status = "completed"
+
+        result.append({
+            "payment_id": p.id,
+            "expense_id": getattr(p, "expense_id", None),
+            "payer_user_id": p.user_id,
+            "payer_name": (payer.email.split("@")[0] if payer else str(p.user_id)),
+            "amount": (float(p.amount_cents) / 100.0) if p.amount_cents is not None else 0.0,
+            "currency": p.currency or "usd",
+            "status": status,
+            "transaction_id": p.stripe_session_id,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        })
+
+    return jsonify(result), 200
+
+
+    
+
 
 
 @app.route('/api/expenses', methods=['POST'])
@@ -880,7 +923,10 @@ def delete_expense(expense_id):
 @app.route("/api/expenses/<int:expense_id>/pay", methods=["POST"])
 @login_required
 def pay_expense(expense_id):
-    """Create a payment record for the current user for this expense."""
+    """
+    Create a Stripe Checkout Session for the current user's share of an expense,
+    create a pending Payment record, and return checkout_url as JSON.
+    """
     user = get_current_user()
     if not user or not user.group_id:
         return jsonify({"error": "Unauthorized"}), 401
@@ -896,23 +942,84 @@ def pay_expense(expense_id):
         return jsonify({"error": "You are not part of this expense"}), 403
 
     amount_cents = int(round(float(split.amount) * 100))
+    if amount_cents <= 0:
+        return jsonify({"error": "Nothing to pay for this expense"}), 400
 
-    # Create payment record (manual / non-stripe for now)
+    # Optional: prevent duplicate "completed" payment for same user+expense
+    existing_paid = Payment.query.filter_by(
+        user_id=user.id,
+        group_id=user.group_id,
+        expense_id=expense.id,
+        status="completed"
+    ).first()
+    if existing_paid:
+        return jsonify({"error": "You already paid this expense"}), 400
+
+    # If you want: prevent multiple pending sessions piling up
+    existing_pending = Payment.query.filter_by(
+        user_id=user.id,
+        group_id=user.group_id,
+        expense_id=expense.id,
+        status="pending"
+    ).first()
+    if existing_pending and existing_pending.stripe_session_id:
+        # You could either reuse it (if you store URL) or just create new.
+        # We'll just continue and create a new session.
+        pass
+
+    # ---------------------------
+    # Stripe Checkout Session
+    # ---------------------------
+
+    try:
+        checkout_session = stripe.checkout.Session.create(
+            mode="payment",
+            payment_method_types=["card"],
+            line_items=[
+                {
+                    "price_data": {
+                        "currency": "usd",
+                        "product_data": {
+                            "name": f"Expense: {expense.description}",
+                            "description": f"Your share for expense #{expense.id}",
+                        },
+                        "unit_amount": amount_cents,
+                    },
+                    "quantity": 1,
+                }
+            ],
+            success_url=url_for("payments_success", _external=True)
+                        + "?session_id={CHECKOUT_SESSION_ID}",
+            cancel_url=url_for("payments_cancel", _external=True),
+            metadata={
+                "expense_id": str(expense.id),
+                "user_id": str(user.id),
+                "group_id": str(user.group_id),
+            },
+        )
+    except Exception as e:
+        return jsonify({"error": f"Stripe error: {str(e)}"}), 500
+
+    # ---------------------------
+    # DB Payment record (pending)
+    # ---------------------------
     payment = Payment(
         user_id=user.id,
         group_id=user.group_id,
         expense_id=expense.id,
         amount_cents=amount_cents,
         currency="usd",
-        status="completed",
-        stripe_session_id=f"manual-exp{expense.id}-u{user.id}",
+        status="pending",
+        stripe_session_id=checkout_session.id,   # IMPORTANT: store session ID, not url
     )
 
     db.session.add(payment)
     db.session.commit()
 
+    # Return JSON so frontend can redirect:
     return jsonify({
         "success": True,
+        "checkout_url": checkout_session.url,
         "payment": {
             "payment_id": payment.id,
             "expense_id": payment.expense_id,
@@ -922,9 +1029,6 @@ def pay_expense(expense_id):
             "created_at": payment.created_at.isoformat() if payment.created_at else None
         }
     }), 201
-
-
-
 
 
 # Init
