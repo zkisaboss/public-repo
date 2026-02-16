@@ -96,7 +96,7 @@
   <div id="chore-list-container"></div>
 </section>
 
-<a href="{{ url_for('home') }}" class="back-link" style="margin-top:1rem;color:#666;display:inline-block;">← Back</a>
+<a href="https://team6-roomsync.vercel.app/" class="back-link" style="margin-top:1rem;color:#666;display:inline-block;">← Back</a>
 
 <script>
   /* ------------------ JavaScript (Combined) ------------------ */
@@ -111,21 +111,35 @@
   const assignedSelect = document.getElementById("assigned-users");
 
   async function loadUsers() {
-    const res = await fetch(USERS_API);
-    const users = await res.json();
-    assignedSelect.innerHTML = "";
-    users.forEach((u) => {
-      const opt = document.createElement("option");
-      opt.value = u.user_id;
-      opt.textContent = u.name;
-      assignedSelect.appendChild(opt);
-    });
+    try {
+      const res = await fetch(USERS_API);
+      if (!res.ok) throw new Error("Failed to fetch users");
+      
+      const users = await res.json();
+      assignedSelect.innerHTML = "";
+
+      users.forEach((u) => {
+        const opt = document.createElement("option");
+        opt.value = u.user_id;
+        opt.textContent = u.name;
+        assignedSelect.appendChild(opt);
+      });
+    } catch (err) {
+     console.error(err);
+     assignedSelect.innerHTML = "<option disabled>Error loading users</option>";
+    }
   }
 
   async function fetchChores() {
-    const res = await fetch(API_BASE);
-    const data = await res.json();
-    renderChores(data);
+    try {
+      const res = await fetch(API_BASE);
+      if (!res.ok) throw new Error("Failed to fetch chores");
+      const data = await res.json();
+      renderChores(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error(err);
+      renderChores([]);
+    }
   }
 
   function renderChores(chores) {
@@ -156,12 +170,15 @@
 
       info.innerHTML = `
       <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.25rem;">
-          <strong style="font-size:1.1rem;">${chore.name}</strong>
+          const title = document.createElement("strong");
+          title.textContent = chore.name;
           ${statusBadge}
       </div>
       <div><strong>Due:</strong> ${chore.nextDueBy || "No due date"}</div>
       <div><strong>Assigned:</strong> ${assignedNames}</div>
-      ${chore.lastCompletedBy.length ? `<div><strong>Last done by:</strong> ${lastCompletedNames}</div>` : ''}
+      ${(chore.lastCompletedBy || []).length 
+        ? `<div><strong>Last done by:</strong> ${lastCompletedNames}</div>` 
+        : ''}
     `;
 
       const actions = document.createElement("div");
@@ -171,7 +188,8 @@
         const completeBtn = document.createElement("button");
         completeBtn.textContent = "Mark Done";
         completeBtn.className = "btn-sm btn-primary";
-        completeBtn.onclick = () => completeChore(chore.choreId);
+        completeBtn.onclick = () => completeChore(chore.id);
+        autoBtn.onclick = () => autoAssignChore(chore.id);
         actions.appendChild(completeBtn);
       }
 
@@ -198,7 +216,10 @@
     const nextDueBy = dueInput.value || null;
     const assignedUserIds = getSelectedAssignedUserIds();
 
-    if (!name) return;
+    if (!name) {
+      alert("Please enter a chore name.");
+      return;
+    }
 
     const res = await fetch(API_BASE, {
       method: "POST",
@@ -209,7 +230,7 @@
     if (res.ok) {
       nameInput.value = "";
       dueInput.value = "";
-      assignedSelect.selectedIndex = -1;
+      Array.from(assignedSelect.options).forEach(opt => opt.selected = false);
       await fetchChores();
     }
   }
