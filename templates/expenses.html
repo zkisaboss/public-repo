@@ -493,10 +493,7 @@
   }
 
   async function payExpense(expenseId) {
-  const res = await fetch(`${API_BASE}/${expenseId}/pay`, {
-    method: "POST"
-  });
-
+  const res = await fetch(`${API_BASE}/${expenseId}/pay`, { method: "POST" });
   const data = await res.json();
 
   if (!res.ok) {
@@ -504,8 +501,8 @@
     return;
   }
 
-  alert("Payment recorded!");
-  await fetchExpenses();
+  // Redirect to Stripe Checkout
+  window.location.href = data.checkout_url;
 }
 
 
