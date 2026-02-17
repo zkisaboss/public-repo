@@ -509,16 +509,6 @@
       deleteBtn.onclick = () => deleteExpense(expense.expenseId);
       actions.appendChild(deleteBtn);
 
-
-      const payBtn = document.createElement("button");
-      payBtn.textContent = "Pay";
-      payBtn.className = "btn-sm";
-      payBtn.style.background = "#38a169";
-      payBtn.style.color = "white";
-      payBtn.onclick = () => payExpense(expense.expenseId);
-      actions.appendChild(payBtn);
-
-
       div.appendChild(info);
       div.appendChild(actions);
       listContainer.appendChild(div);
@@ -623,39 +613,7 @@
 
   function viewExpenseDetails(expense) {
     const content = document.getElementById("details-content");
-    const paymentsHTML = expense.payments && expense.payments.length
-      ? `
-        <div class="summary-card">
-          <h4 style="margin-top: 0;">Payment Details</h4>
-          ${expense.payments.map(p => `
-            <div class="summary-row">
-              <span>Transaction ID:</span>
-              <span>${p.transaction_id}</span>
-          </div>
-          <div class="summary-row">
-            <span>Date:</span>
-            <span>${p.created_at || "N/A"}</span>
-          </div>
-          <div class="summary-row">
-            <span>Amount:</span>
-            <span>$${(p.amount_cents / 100).toFixed(2)}</span>
-          </div>
-          <div class="summary-row">
-            <span>Status:</span>
-            <span>${p.status}</span>
-          </div>
-        `).join('')}
-      </div>
-    `
-    : `
-      <div class="summary-card">
-        <h4 style="margin-top: 0;">Payment Details</h4>
-        <div class="summary-row">
-          <span>No payments recorded yet.</span>
-        </div>
-      </div>
-    `;
-
+    
     const summaryHTML = `
       <div class="summary-card">
         <h4 style="margin-top: 0;">Expense Summary</h4>
@@ -686,10 +644,8 @@
           </div>
         `).join('')}
       </div>
-
-      ${paymentsHTML}
     `;
-
+    
     content.innerHTML = summaryHTML;
     document.getElementById("details-modal").classList.add("active");
   }
@@ -697,20 +653,6 @@
   function closeDetailsModal() {
     document.getElementById("details-modal").classList.remove("active");
   }
-
-  async function payExpense(expenseId) {
-  const res = await fetch(`${API_BASE}/${expenseId}/pay`, { method: "POST" });
-  const data = await res.json();
-
-  if (!res.ok) {
-    alert(data.error || "Payment failed");
-    return;
-  }
-
-  // Redirect to Stripe Checkout
-  window.location.href = data.checkout_url;
-}
-
 
   addBtn.addEventListener("click", createExpense);
   filterUserSelect.addEventListener("change", renderExpenses);

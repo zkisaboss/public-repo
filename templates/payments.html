@@ -2,128 +2,23 @@
 {% block title %}Payments{% endblock %}
 
 {% block content %}
-<header class="page-header">
-  <h1>Payments</h1>
-  <p class="subtitle">Payment & transaction history</p>
-</header>
+<div class="card">
+    <h1>Payments</h1>
 
-<section class="card">
-  <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap; margin-bottom:1rem;">
-    <select id="status-filter" style="padding:0.5rem; border:1px solid #ddd; border-radius:6px;">
-      <option value="">All statuses</option>
-      <option value="completed">Completed</option>
-      <option value="pending">Pending</option>
-    </select>
+    <div class="payment-info">
+        <p>Grocery total: $0.00</p>
+        <p>Your share: $0.00</p>
+    </div>
 
-    <input id="search" type="text" placeholder="Search transaction ID / user / expense"
-           style="padding:0.5rem; border:1px solid #ddd; border-radius:6px; flex:1; min-width:220px;">
-  </div>
+    <form action="{{ url_for('create_checkout_session') }}" method="POST">
+        <!-- $10 in cents -->
+        <input type="hidden" name="amount_cents" value="1000">
+        <button type="submit" class="btn">Pay your share</button>
+    </form>
 
-  <div style="overflow-x:auto;">
-    <table style="width:100%; border-collapse:collapse;">
-      <thead>
-        <tr style="text-align:left; border-bottom:1px solid #eee;">
-          <th style="padding:0.75rem;">Date</th>
-          <th style="padding:0.75rem;">Status</th>
-          <th style="padding:0.75rem;">Amount</th>
-          <th style="padding:0.75rem;">Payer</th>
-          <th style="padding:0.75rem;">Expense ID</th>
-          <th style="padding:0.75rem;">Transaction ID</th>
-        </tr>
-      </thead>
-      <tbody id="payments-body"></tbody>
-    </table>
-  </div>
-
-  <p id="empty" style="display:none; color:#888; padding:1rem 0;">No payments yet.</p>
-</section>
-
-<script>
-  const PAYMENTS_API = "/api/payments";
-  let payments = [];
-
-  const bodyEl = document.getElementById("payments-body");
-  const emptyEl = document.getElementById("empty");
-  const statusFilter = document.getElementById("status-filter");
-  const searchInput = document.getElementById("search");
-
-  function fmtDate(iso) {
-    if (!iso) return "-";
-    const d = new Date(iso);
-    return d.toLocaleString();
-  }
-
-  function fmtMoney(n, currency="usd") {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: (currency || "usd").toUpperCase()
-    }).format(n);
-  }
-
-  function badge(status) {
-    const s = (status || "").toLowerCase();
-    const isDone = s === "completed";
-    const bg = isDone ? "#e6ffed" : "#fff5e6";
-    const fg = isDone ? "#1a7f37" : "#9a6700";
-    return `<span style="background:${bg}; color:${fg}; padding:0.2rem 0.5rem; border-radius:999px; font-size:0.85rem;">
-      ${status || "unknown"}
-    </span>`;
-  }
-
-  function render() {
-    const status = statusFilter.value.trim().toLowerCase();
-    const q = searchInput.value.trim().toLowerCase();
-
-    const filtered = payments.filter(p => {
-      if (status && (p.status || "").toLowerCase() !== status) return false;
-
-      if (!q) return true;
-      const hay = [
-        p.transaction_id,
-        p.payer_name,
-        String(p.expense_id ?? ""),
-        String(p.payment_id ?? "")
-      ].join(" ").toLowerCase();
-      return hay.includes(q);
-    });
-
-    bodyEl.innerHTML = "";
-    emptyEl.style.display = filtered.length ? "none" : "block";
-
-    filtered.forEach(p => {
-      const tr = document.createElement("tr");
-      tr.style.borderBottom = "1px solid #f0f0f0";
-      tr.innerHTML = `
-        <td style="padding:0.75rem;">${fmtDate(p.created_at)}</td>
-        <td style="padding:0.75rem;">${badge(p.status)}</td>
-        <td style="padding:0.75rem; font-weight:600;">${fmtMoney(p.amount, p.currency)}</td>
-        <td style="padding:0.75rem;">${p.payer_name || "-"}</td>
-        <td style="padding:0.75rem;">${p.expense_id ?? "-"}</td>
-        <td style="padding:0.75rem; font-family: monospace;">
-          ${p.transaction_id || "-"}
-        </td>
-      `;
-      bodyEl.appendChild(tr);
-    });
-  }
-
-  async function loadPayments() {
-    const res = await fetch(PAYMENTS_API);
-    const data = await res.json();
-    if (!res.ok) {
-      alert(data.error || "Failed to load payments");
-      return;
-    }
-    payments = data;
-    render();
-  }
-
-  statusFilter.addEventListener("change", render);
-  searchInput.addEventListener("input", render);
-
-  loadPayments();
-  setInterval(loadPayments, 3000);
-</script>
+    <a href="{{ url_for('groceries') }}" class="btn btn-secondary mt-1">
+        Back to Groceries
+    </a>
+</div>
 {% endblock %}
-
 
