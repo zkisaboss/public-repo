@@ -1,12 +1,109 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.orm import relationship
+from datetime import datetime, date
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 from sqlalchemy.exc import IntegrityError
 
+db = SQLAlchemy()
+
+# --- MODELS --- (In-lined to avoid missing files)
+
+class User(db.Model):
+    __tablename__ = 'users'
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password = db.Column(db.String(255), nullable=False)
+    group_id = db.Column(db.Integer, db.ForeignKey('groups.id'))
+    group = relationship('Group', backref='users')
+
+class Group(db.Model):
+    __tablename__ = 'groups'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    code = db.Column(db.String(10), unique=True, nullable=False)
+
+class Payment(db.Model):
+    __tablename__ = 'payments'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
+    expense_id = db.Column(db.Integer, db.ForeignKey('expenses.id'), nullable=True)
+
+    amount_cents = db.Column(db.Integer, nullable=False)
+    currency = db.Column(db.String(3), default='usd')
+    status = db.Column(db.String(20), default='pending')
+    stripe_session_id = db.Column(db.String(255), unique=True, nullable=False)
+    stripe_payment_intent_id = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class GroceryItem(db.Model):
+    __tablename__ = 'grocery_items'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    quantity = db.Column(db.Integer, default=1)
+    price = db.Column(db.Float)
+    purchased = db.Column(db.Boolean, default=False)
+    group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
+
+class Expense(db.Model):
+    __tablename__ = 'expenses'
+    id = db.Column(db.Integer, primary_key=True)
+    description = db.Column(db.String(255), nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    paid_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    paid_by = relationship('User', foreign_keys=[paid_by_user_id])
+    group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    splits = relationship('ExpenseSplit', backref='expense', cascade="all, delete-orphan")
+    payments = relationship('Payment', backref='expense', lazy=True)
+
+
+class ExpenseSplit(db.Model):
+    __tablename__ = 'expense_splits'
+    id = db.Column(db.Integer, primary_key=True)
+    expense_id = db.Column(db.Integer, db.ForeignKey('expenses.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    user = relationship('User', foreign_keys=[user_id])
+    percentage = db.Column(db.Float, nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+
+# Chore models
+chore_assignments = db.Table('chore_assignments',
+    db.Column('chore_id', db.Integer, db.ForeignKey('chores.id'), primary_key=True),
+    db.Column('user_id', db.Integer, db.ForeignKey('users.id'), primary_key=True)
+)
+
+class Chore(db.Model):
+    __tablename__ = 'chores'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
+    next_due_date = db.Column(db.Date) # stored as date
+    completed = db.Column(db.Boolean, default=False)
+    # last_completed_by logic: simple string or FK for now
+    last_completed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    last_completed_by = relationship('User', foreign_keys=[last_completed_by_id])
+    assignees = relationship('User', secondary=chore_assignments, backref='assigned_chores')
+
+
+# Auth helpers
+def login_required(f):
+    @wraps(f)
+    def wrap(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return wrap
 import os
 import sys
 import secrets
+from datetime import datetime, date
+from PIL import Image
+import io
+import re
 import stripe
 import json
 import base64
@@ -48,7 +145,23 @@ print(f"Using database: {database_url.split('@')[0]}...", file=sys.stderr)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
-db = SQLAlchemy(app)
+
+db.init_app(app)
+# --- CHORES API ---
+
+@app.route('/api/users', methods=['GET'])
+@login_required
+def get_users():
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    users = User.query.filter_by(group_id=user.group_id).all()
+    # Filter out current user? Typically optional but UI allows multi select so list all.
+    return jsonify([
+        {'user_id': u.id, 'name': u.email.split('@')[0]} 
+        for u in users
+    ])
 
 # Email Configuration
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
@@ -65,46 +178,85 @@ scheduler = BackgroundScheduler()
 scheduler.start()
 atexit.register(lambda: scheduler.shutdown())
 
-# Models
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    email = db.Column(db.String(120), unique=True, nullable=False, index=True)
-    password = db.Column(db.String(200), nullable=False)
-    group_id = db.Column(db.Integer, db.ForeignKey('group.id'))
+@app.route('/api/chores', methods=['GET'])
+@login_required
+def get_chores():
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+        
+    chores = Chore.query.filter_by(group_id=user.group_id).order_by(Chore.next_due_date).all()
+    result = []
+    for chore in chores:
+        result.append({
+            'choreId': chore.id,
+            'name': chore.name,
+            # Format date as YYYY-MM-DD
+            'nextDueBy': chore.next_due_date.isoformat() if chore.next_due_date else None,
+            'completed': chore.completed,
+            'assignedUsers': [{'name': u.email.split('@')[0]} for u in chore.assignees],
+            'lastCompletedBy': [{'name': chore.last_completed_by.email.split('@')[0]}] if chore.last_completed_by else []
+        })
+    return jsonify(result)
 
+@app.route('/api/chores', methods=['POST'])
+@login_required
+def create_chore():
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+        
+    data = request.get_json()
+    name = data.get('name')
+    if not name:
+        return jsonify({'error': 'Name required'}), 400
+        
+    next_due = None
+    if val := data.get('nextDueBy'):
+        try:
+            next_due = date.fromisoformat(val)
+        except ValueError:
+            pass
+            
+    chore = Chore(
+        name=name,
+        group_id=user.group_id,
+        next_due_date=next_due
+    )
+    
+    if 'assignedUserIds' in data:
+        ids = data['assignedUserIds']
+        # Ensure ids is a list of methods
+        if isinstance(ids, list):
+           users = User.query.filter(User.id.in_(ids)).all()
+           chore.assignees.extend(users)
+        
+    db.session.add(chore)
+    db.session.commit()
+    return jsonify({'success': True})
 
-class Group(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    code = db.Column(db.String(8), unique=True, nullable=False, index=True)
-    users = db.relationship('User', backref='group', lazy='dynamic')
+@app.route('/api/chores/<int:chore_id>/complete', methods=['POST'])
+@login_required
+def complete_chore(chore_id):
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+        
+    chore = Chore.query.filter_by(id=chore_id, group_id=user.group_id).first()
+    if not chore:
+        return jsonify({'error': 'Chore not found'}), 404
+        
+    chore.completed = True
+    chore.last_completed_by = user
+    db.session.commit()
+    return jsonify({'success': True})
 
-class Payment(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
-    group_id = db.Column(db.Integer, db.ForeignKey("group.id"), nullable=False)
-
-    amount_cents = db.Column(db.Integer, nullable=False)
-    currency = db.Column(db.String(10), nullable=False, default="usd")
-
-    status = db.Column(db.String(30), nullable=False, default="pending")
-
-    stripe_session_id = db.Column(db.String(255), unique=True, nullable=False)
-    stripe_payment_intent_id = db.Column(db.String(255), nullable=True)
-
-    created_at = db.Column(db.DateTime, server_default=db.func.now())
-
-
-
-class GroceryItem(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(200), nullable=False)
-    quantity = db.Column(db.Integer, default=1)
-    price = db.Column(db.Float, nullable=True)
-    purchased = db.Column(db.Boolean, default=False)
-    group_id = db.Column(db.Integer, db.ForeignKey('group.id'), nullable=False)
-
+@app.route('/api/chores/<int:chore_id>/auto-assign', methods=['POST'])
+@login_required
+def auto_assign_chore(chore_id):
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
 
 # Association table for ChoreAssignments
 chore_assignments = db.Table('chore_assignments',
@@ -305,6 +457,14 @@ def login_required(f):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return wrap
+    chore = Chore.query.filter_by(id=chore_id, group_id=user.group_id).first()
+    if not chore:
+        return jsonify({'error': 'Chore not found'}), 404
+    
+    # Just reset completion for now
+    chore.completed = False
+    db.session.commit()
+    return jsonify({'success': True})
 
 
 def get_current_user():
@@ -774,9 +934,9 @@ def modify_grocery(item_id):
     return jsonify({'updated': True})
 
 
+# =============================================================================
 # Chores API Routes
-
-
+# =============================================================================
 
 def chore_to_dict(chore):
     return {
@@ -884,8 +1044,9 @@ def auto_assign_chore_route(chore_id):
     db.session.commit()
     
     return jsonify(chore_to_dict(chore))
+# Chores API Routes are now in chores.py
 
-
+# ===== Payment API Routes =====
 
 @app.route("/payments")
 @login_required
@@ -922,16 +1083,68 @@ def get_expenses():
             'paidBy': {
                 'user_id': expense.paid_by_user_id,
                 'name': expense.paid_by.email.split('@')[0]
-            },
-            'splits': [{
+             },
+             'splits': [{
                 'user_id': s.user_id,
                 'user_name': s.user.email.split('@')[0],
                 'percentage': float(s.percentage),
                 'amount': float(s.amount)
-            } for s in expense.splits]
+            } for s in expense.splits],
+
+            'payments': [{
+                'payment_id': p.id,
+                'user_id': p.user_id,
+                'amount_cents': p.amount_cents,
+                'status': p.status,
+                'transaction_id': p.stripe_session_id,
+                'created_at': p.created_at.isoformat() if p.created_at else None
+            } for p in expense.payments]
         })
-    
+
     return jsonify(result)
+
+
+
+@app.route("/api/payments", methods=["GET"])
+@login_required
+def get_payments():
+    """Return payment history for the current user's group."""
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    payments = (
+        Payment.query
+        .filter_by(group_id=user.group_id)
+        .order_by(Payment.created_at.desc())
+        .all()
+    )
+
+    result = []
+    for p in payments:
+        payer = User.query.get(p.user_id)
+
+        status = (p.status or "pending").lower()
+        if status in ["paid", "succeeded", "success"]:
+            status = "completed"
+
+        result.append({
+            "payment_id": p.id,
+            "expense_id": getattr(p, "expense_id", None),
+            "payer_user_id": p.user_id,
+            "payer_name": (payer.email.split("@")[0] if payer else str(p.user_id)),
+            "amount": (float(p.amount_cents) / 100.0) if p.amount_cents is not None else 0.0,
+            "currency": p.currency or "usd",
+            "status": status,
+            "transaction_id": p.stripe_session_id,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        })
+
+    return jsonify(result), 200
+
+
+    
+
 
 
 @app.route('/api/expenses', methods=['POST'])
@@ -1037,6 +1250,116 @@ def delete_expense(expense_id):
     db.session.commit()
     return jsonify({'success': True})
 
+@app.route("/api/expenses/<int:expense_id>/pay", methods=["POST"])
+@login_required
+def pay_expense(expense_id):
+    """
+    Create a Stripe Checkout Session for the current user's share of an expense,
+    create a pending Payment record, and return checkout_url as JSON.
+    """
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    # Make sure expense is in the same group
+    expense = Expense.query.filter_by(id=expense_id, group_id=user.group_id).first()
+    if not expense:
+        return jsonify({"error": "Expense not found"}), 404
+
+    # Find this user's split for the expense
+    split = ExpenseSplit.query.filter_by(expense_id=expense.id, user_id=user.id).first()
+    if not split:
+        return jsonify({"error": "You are not part of this expense"}), 403
+
+    amount_cents = int(round(float(split.amount) * 100))
+    if amount_cents <= 0:
+        return jsonify({"error": "Nothing to pay for this expense"}), 400
+
+    # Optional: prevent duplicate "completed" payment for same user+expense
+    existing_paid = Payment.query.filter_by(
+        user_id=user.id,
+        group_id=user.group_id,
+        expense_id=expense.id,
+        status="completed"
+    ).first()
+    if existing_paid:
+        return jsonify({"error": "You already paid this expense"}), 400
+
+    # If you want: prevent multiple pending sessions piling up
+    existing_pending = Payment.query.filter_by(
+        user_id=user.id,
+        group_id=user.group_id,
+        expense_id=expense.id,
+        status="pending"
+    ).first()
+    if existing_pending and existing_pending.stripe_session_id:
+        # You could either reuse it (if you store URL) or just create new.
+        # We'll just continue and create a new session.
+        pass
+
+    # ---------------------------
+    # Stripe Checkout Session
+    # ---------------------------
+
+    try:
+        checkout_session = stripe.checkout.Session.create(
+            mode="payment",
+            payment_method_types=["card"],
+            line_items=[
+                {
+                    "price_data": {
+                        "currency": "usd",
+                        "product_data": {
+                            "name": f"Expense: {expense.description}",
+                            "description": f"Your share for expense #{expense.id}",
+                        },
+                        "unit_amount": amount_cents,
+                    },
+                    "quantity": 1,
+                }
+            ],
+            success_url=url_for("payments_success", _external=True)
+                        + "?session_id={CHECKOUT_SESSION_ID}",
+            cancel_url=url_for("payments_cancel", _external=True),
+            metadata={
+                "expense_id": str(expense.id),
+                "user_id": str(user.id),
+                "group_id": str(user.group_id),
+            },
+        )
+    except Exception as e:
+        return jsonify({"error": f"Stripe error: {str(e)}"}), 500
+
+    # ---------------------------
+    # DB Payment record (pending)
+    # ---------------------------
+    payment = Payment(
+        user_id=user.id,
+        group_id=user.group_id,
+        expense_id=expense.id,
+        amount_cents=amount_cents,
+        currency="usd",
+        status="pending",
+        stripe_session_id=checkout_session.id,   # IMPORTANT: store session ID, not url
+    )
+
+    db.session.add(payment)
+    db.session.commit()
+
+    # Return JSON so frontend can redirect:
+    return jsonify({
+        "success": True,
+        "checkout_url": checkout_session.url,
+        "payment": {
+            "payment_id": payment.id,
+            "expense_id": payment.expense_id,
+            "amount_cents": payment.amount_cents,
+            "status": payment.status,
+            "transaction_id": payment.stripe_session_id,
+            "created_at": payment.created_at.isoformat() if payment.created_at else None
+        }
+    }), 201
+
 
 @app.route('/api/expenses/<int:expense_id>/remind/<int:user_id>', methods=['POST'])
 @login_required
@@ -1099,3 +1422,4 @@ with app.app_context():
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
+    app.run(debug=True, port=5000)

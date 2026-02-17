@@ -2,7 +2,7 @@ Flask==3.1.2
 Flask-SQLAlchemy==3.1.1
 SQLAlchemy==2.0.46
 python-dotenv==1.2.1
-stripe==14.3.0
+stripe
 requests==2.32.5
 Pillow
 anthropic

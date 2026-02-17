@@ -3,221 +3,6 @@
 {% block title %}Household Expenses{% endblock %}
 
 {% block content %}
-<style>
-  /* Expenses Specific Styles */
-  .form-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    align-items: flex-end;
-  }
-
-  .form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .form-group label {
-    font-size: 0.85rem;
-    font-weight: 500;
-    color: #555;
-  }
-
-  .create-expense input[type="text"],
-  .create-expense input[type="number"] {
-    flex: 1;
-    min-width: 120px;
-  }
-
-  .create-expense input[type="date"] {
-    flex: 1;
-    min-width: 140px;
-  }
-
-  .create-expense select {
-    flex: 1;
-    min-width: 140px;
-  }
-
-  .create-expense button {
-    flex: 0 0 auto;
-    margin-top: auto;
-  }
-
-  .expense-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    padding: 0.75rem 0;
-    border-bottom: 1px solid #eee;
-  }
-
-  .expense-item:last-child {
-    border-bottom: none;
-  }
-
-  .expense-info {
-    flex: 1;
-  }
-
-  .expense-info div {
-    font-size: 0.9rem;
-    color: #555;
-    margin-top: 0.25rem;
-  }
-
-  .expense-amount {
-    font-size: 1.2rem;
-    font-weight: bold;
-    color: #2c5282;
-  }
-
-  .expense-actions {
-    display: flex;
-    gap: 0.5rem;
-    min-width: 200px;
-    justify-content: flex-end;
-  }
-
-  .split-mode-toggle {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
-  }
-
-  .split-mode-toggle button {
-    flex: 1;
-    padding: 0.5rem;
-    border: 1px solid #ddd;
-    background: white;
-    cursor: pointer;
-    border-radius: 4px;
-    font-size: 0.85rem;
-  }
-
-  .split-mode-toggle button.active {
-    background: #4299e1;
-    color: white;
-    border-color: #4299e1;
-  }
-
-  .custom-split-container {
-    margin-top: 1rem;
-    padding: 1rem;
-    background: #f7fafc;
-    border-radius: 4px;
-    display: none;
-  }
-
-  .custom-split-container.active {
-    display: block;
-  }
-
-  .split-user-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
-  }
-
-  .split-user-row label {
-    flex: 1;
-    font-size: 0.9rem;
-  }
-
-  .split-user-row input {
-    width: 80px;
-  }
-
-  .modal {
-    display: none;
-    position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.5);
-  }
-
-  .modal.active {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .modal-content {
-    background-color: white;
-    padding: 2rem;
-    border-radius: 8px;
-    max-width: 500px;
-    width: 90%;
-    max-height: 80vh;
-    overflow-y: auto;
-  }
-
-  .modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1.5rem;
-  }
-
-  .modal-header h3 {
-    margin: 0;
-  }
-
-  .close-modal {
-    background: none;
-    border: none;
-    font-size: 1.5rem;
-    cursor: pointer;
-    color: #666;
-  }
-
-  .summary-card {
-    background: #f7fafc;
-    padding: 1rem;
-    border-radius: 4px;
-    margin-bottom: 1rem;
-  }
-
-  .summary-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 0.5rem 0;
-    border-bottom: 1px solid #e2e8f0;
-  }
-
-  .summary-row:last-child {
-    border-bottom: none;
-    font-weight: bold;
-    font-size: 1.1rem;
-    padding-top: 0.75rem;
-  }
-
-  @media (max-width: 768px) {
-    .expense-item {
-      flex-direction: column;
-      gap: 1rem;
-    }
-
-    .form-row {
-      flex-direction: column;
-    }
-
-    .expense-actions {
-      width: 100%;
-      flex-direction: row;
-      min-width: auto;
-    }
-
-    .expense-actions button {
-      flex: 1;
-    }
-  }
-</style>
 
 <header class="page-header">
   <h1>Household Expenses</h1>
@@ -226,32 +11,33 @@
 
 <section class="card create-expense">
   <h2>Add Expense</h2>
-  <div class="form-row">
-    <div class="form-group">
+  <div class="form-row-flexible">
+    <div class="form-group flex-1 min-w-120">
       <label for="expense-description">Description</label>
-      <input id="expense-description" type="text" placeholder="e.g., Groceries, Utilities" aria-label="Expense Description" />
+      <input id="expense-description" type="text" placeholder="e.g., Groceries, Utilities"
+        aria-label="Expense Description" />
     </div>
-    <div class="form-group">
+    <div class="form-group flex-1 min-w-120">
       <label for="expense-amount">Amount ($)</label>
       <input id="expense-amount" type="number" step="0.01" min="0" placeholder="0.00" aria-label="Amount" />
     </div>
-    <div class="form-group">
+    <div class="form-group flex-1 min-w-140">
       <label for="expense-date">Date</label>
       <input id="expense-date" type="date" aria-label="Date" />
     </div>
-    <div class="form-group">
+    <div class="form-group flex-1 min-w-140">
       <label for="paid-by">Paid By</label>
       <select id="paid-by" aria-label="Paid By User"></select>
     </div>
-    <button id="add-expense-btn" class="btn-primary">Add</button>
+    <button id="add-expense-btn" class="btn-primary" style="margin-bottom: 1rem;">Add</button>
   </div>
 
-  <div class="split-mode-toggle">
-    <button id="split-even-btn" class="active">Split Evenly</button>
-    <button id="split-custom-btn">Custom Split</button>
+  <div class="toggle-group">
+    <button id="split-even-btn" class="toggle-btn active">Split Evenly</button>
+    <button id="split-custom-btn" class="toggle-btn">Custom Split</button>
   </div>
 
-  <div id="custom-split-container" class="custom-split-container">
+  <div id="custom-split-container" class="toggle-content">
     <h3 style="font-size: 1rem; margin-bottom: 0.75rem;">Custom Split (Percentage)</h3>
     <div id="custom-split-users"></div>
     <p id="split-total" style="margin-top: 0.5rem; font-size: 0.85rem; color: #666;"></p>
@@ -281,19 +67,23 @@
     </div>
     <div class="form-group" style="margin-bottom: 1rem;">
       <label for="edit-description">Description</label>
-      <input id="edit-description" type="text" style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;" />
+      <input id="edit-description" type="text"
+        style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;" />
     </div>
     <div class="form-group" style="margin-bottom: 1rem;">
       <label for="edit-amount">Amount ($)</label>
-      <input id="edit-amount" type="number" step="0.01" min="0" style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;" />
+      <input id="edit-amount" type="number" step="0.01" min="0"
+        style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;" />
     </div>
     <div class="form-group" style="margin-bottom: 1rem;">
       <label for="edit-date">Date</label>
-      <input id="edit-date" type="date" style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;" />
+      <input id="edit-date" type="date"
+        style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;" />
     </div>
     <div class="form-group" style="margin-bottom: 1rem;">
       <label for="edit-paid-by">Paid By</label>
-      <select id="edit-paid-by" style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;"></select>
+      <select id="edit-paid-by"
+        style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;"></select>
     </div>
     <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
       <button onclick="closeEditModal()" class="btn-secondary">Cancel</button>
@@ -344,7 +134,7 @@
   async function loadUsers() {
     const res = await fetch(USERS_API);
     users = await res.json();
-    
+
     // Populate paid-by select
     paidBySelect.innerHTML = "";
     users.forEach((u) => {
@@ -380,34 +170,38 @@
   function initializeCustomSplit() {
     customSplitUsers.innerHTML = "";
     customSplits = {};
-    
+
     users.forEach((u) => {
       customSplits[u.user_id] = 0;
-      
+
       const row = document.createElement("div");
-      row.className = "split-user-row";
-      
+      row.className = "flex-row items-center gap-05";
+      row.style.marginBottom = "0.5rem";
+
       const label = document.createElement("label");
       label.textContent = u.name;
-      
+      label.className = "flex-1";
+      label.style.fontSize = "0.9rem";
+
       const input = document.createElement("input");
       input.type = "number";
       input.min = "0";
       input.max = "100";
       input.step = "0.01";
       input.value = "0";
+      input.style.width = "80px";
       input.dataset.userId = u.user_id;
       input.addEventListener("input", updateSplitTotal);
-      
+
       const percent = document.createElement("span");
       percent.textContent = "%";
-      
+
       row.appendChild(label);
       row.appendChild(input);
       row.appendChild(percent);
       customSplitUsers.appendChild(row);
     });
-    
+
     updateSplitTotal();
   }
 
@@ -419,7 +213,7 @@
       customSplits[input.dataset.userId] = val;
       total += val;
     });
-    
+
     splitTotalText.textContent = `Total: ${total.toFixed(2)}%`;
     if (Math.abs(total - 100) < 0.01) {
       splitTotalText.style.color = "#22863a";
@@ -451,10 +245,10 @@
   function renderExpenses() {
     const filterUserId = filterUserSelect.value;
     let filtered = expenses;
-    
+
     if (filterUserId) {
-      filtered = expenses.filter(e => 
-        e.paidBy.user_id == filterUserId || 
+      filtered = expenses.filter(e =>
+        e.paidBy.user_id == filterUserId ||
         e.splits.some(s => s.user_id == filterUserId)
       );
     }
@@ -467,27 +261,27 @@
 
     filtered.forEach((expense) => {
       const div = document.createElement("div");
-      div.className = "expense-item";
+      div.className = "list-item-complex";
 
       const info = document.createElement("div");
-      info.className = "expense-info";
+      info.className = "item-info";
 
       const splitInfo = expense.splits
         .map(s => `${s.user_name}: $${s.amount.toFixed(2)} (${s.percentage.toFixed(1)}%)`)
         .join(", ");
 
       info.innerHTML = `
-        <div style="display:flex; align-items:baseline; gap:0.5rem; margin-bottom:0.25rem;">
-          <strong style="font-size:1.1rem;">${expense.description}</strong>
-          <span class="expense-amount">$${parseFloat(expense.amount).toFixed(2)}</span>
+        <div class="item-info-row">
+          <span class="item-title">${expense.description}</span>
+          <span class="item-amount">$${parseFloat(expense.amount).toFixed(2)}</span>
         </div>
-        <div><strong>Date:</strong> ${expense.date}</div>
-        <div><strong>Paid by:</strong> ${expense.paidBy.name}</div>
-        <div><strong>Split:</strong> ${splitInfo}</div>
+        <div class="item-subtitle"><strong>Date:</strong> ${expense.date}</div>
+        <div class="item-subtitle"><strong>Paid by:</strong> ${expense.paidBy.name}</div>
+        <div class="item-subtitle"><strong>Split:</strong> ${splitInfo}</div>
       `;
 
       const actions = document.createElement("div");
-      actions.className = "expense-actions";
+      actions.className = "item-actions";
 
       const viewBtn = document.createElement("button");
       viewBtn.textContent = "View";
@@ -508,6 +302,16 @@
       deleteBtn.style.color = "white";
       deleteBtn.onclick = () => deleteExpense(expense.expenseId);
       actions.appendChild(deleteBtn);
+
+
+      const payBtn = document.createElement("button");
+      payBtn.textContent = "Pay";
+      payBtn.className = "btn-sm";
+      payBtn.style.background = "#38a169";
+      payBtn.style.color = "white";
+      payBtn.onclick = () => payExpense(expense.expenseId);
+      actions.appendChild(payBtn);
+
 
       div.appendChild(info);
       div.appendChild(actions);
@@ -613,7 +417,39 @@
 
   function viewExpenseDetails(expense) {
     const content = document.getElementById("details-content");
-    
+    const paymentsHTML = expense.payments && expense.payments.length
+      ? `
+        <div class="summary-card">
+          <h4 style="margin-top: 0;">Payment Details</h4>
+          ${expense.payments.map(p => `
+            <div class="summary-row">
+              <span>Transaction ID:</span>
+              <span>${p.transaction_id}</span>
+          </div>
+          <div class="summary-row">
+            <span>Date:</span>
+            <span>${p.created_at || "N/A"}</span>
+          </div>
+          <div class="summary-row">
+            <span>Amount:</span>
+            <span>$${(p.amount_cents / 100).toFixed(2)}</span>
+          </div>
+          <div class="summary-row">
+            <span>Status:</span>
+            <span>${p.status}</span>
+          </div>s
+        `).join('')}
+      </div>
+    `
+    : `
+      <div class="summary-card">
+        <h4 style="margin-top: 0;">Payment Details</h4>
+        <div class="summary-row">
+          <span>No payments recorded yet.</span>
+        </div>
+      </div>
+    `;
+
     const summaryHTML = `
       <div class="summary-card">
         <h4 style="margin-top: 0;">Expense Summary</h4>
@@ -644,8 +480,10 @@
           </div>
         `).join('')}
       </div>
+
+      ${paymentsHTML}
     `;
-    
+
     content.innerHTML = summaryHTML;
     document.getElementById("details-modal").classList.add("active");
   }
@@ -653,6 +491,20 @@
   function closeDetailsModal() {
     document.getElementById("details-modal").classList.remove("active");
   }
+
+  async function payExpense(expenseId) {
+  const res = await fetch(`${API_BASE}/${expenseId}/pay`, { method: "POST" });
+  const data = await res.json();
+
+  if (!res.ok) {
+    alert(data.error || "Payment failed");
+    return;
+  }
+
+  // Redirect to Stripe Checkout
+  window.location.href = data.checkout_url;
+}
+
 
   addBtn.addEventListener("click", createExpense);
   filterUserSelect.addEventListener("change", renderExpenses);
