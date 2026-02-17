@@ -96,6 +96,10 @@ def login_required(f):
 import os
 import sys
 import secrets
+from datetime import datetime, date
+from PIL import Image
+import io
+import re
 import stripe
 import json
 import base64
@@ -232,6 +236,44 @@ def auto_assign_chore(chore_id):
     if not user or not user.group_id:
         return jsonify({'error': 'Unauthorized'}), 401
 
+# Association table for ChoreAssignments
+chore_assignments = db.Table('chore_assignments',
+    db.Column('user_id', db.Integer, db.ForeignKey('user.id'), primary_key=True),
+    db.Column('chore_id', db.Integer, db.ForeignKey('chore.id'), primary_key=True)
+)
+
+
+class Chore(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    next_due_date = db.Column(db.Date, nullable=True)
+    completed = db.Column(db.Boolean, default=False)
+    group_id = db.Column(db.Integer, db.ForeignKey('group.id'), nullable=False)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+
+    # Relationships
+    assignments = db.relationship('User', secondary=chore_assignments, lazy='subquery',
+        backref=db.backref('assigned_chores', lazy=True))
+    completions = db.relationship('ChoreCompletion', backref='chore', lazy=True, cascade="all, delete-orphan")
+
+
+class ChoreCompletion(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    chore_id = db.Column(db.Integer, db.ForeignKey('chore.id'), nullable=False)
+    completed_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref='chore_completions')
+
+
+# Auth helpers
+def login_required(f):
+    @wraps(f)
+    def wrap(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return wrap
     chore = Chore.query.filter_by(id=chore_id, group_id=user.group_id).first()
     if not chore:
         return jsonify({'error': 'Chore not found'}), 404
@@ -709,6 +751,116 @@ def modify_grocery(item_id):
     return jsonify({'updated': True})
 
 
+# =============================================================================
+# Chores API Routes
+# =============================================================================
+
+def chore_to_dict(chore):
+    return {
+        "choreId": chore.id,
+        "name": chore.name,
+        "assignedUsers": [
+            {"user_id": u.id, "name": u.email.split('@')[0]} for u in chore.assignments
+        ],
+        "lastCompletedBy": [
+            {"user_id": c.user.id, "name": c.user.email.split('@')[0]} 
+            for c in sorted(chore.completions, key=lambda x: x.completed_at, reverse=True)
+        ],
+        "createdBy": (
+            {"user_id": chore.created_by_id, "name": "User"} 
+            if chore.created_by_id else None
+        ),
+        "nextDueBy": chore.next_due_date.isoformat() if chore.next_due_date else None,
+        "completed": chore.completed,
+    }
+
+@app.route("/api/users", methods=["GET"])
+@login_required
+def get_users():
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify([])
+    
+    group_users = User.query.filter_by(group_id=user.group_id).all()
+    return jsonify([{"user_id": u.id, "name": u.email.split('@')[0]} for u in group_users])
+
+@app.route("/api/chores", methods=["GET", "POST"])
+@login_required
+def chores_api():
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+        
+    if request.method == "GET":
+        chores = Chore.query.filter_by(group_id=user.group_id).order_by(Chore.completed, Chore.next_due_date).all()
+        return jsonify([chore_to_dict(c) for c in chores])
+
+    data = request.get_json()
+    name = data.get("name", "").strip()
+    next_due_str = data.get("nextDueBy")
+    assigned_ids = data.get("assignedUserIds", [])
+
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+
+    next_due = date.fromisoformat(next_due_str) if next_due_str else None
+    
+    assigned_users = User.query.filter(User.id.in_(assigned_ids), User.group_id == user.group_id).all()
+
+    chore = Chore(
+        name=name,
+        group_id=user.group_id,
+        created_by_id=user.id,
+        next_due_date=next_due,
+        completed=False
+    )
+    chore.assignments.extend(assigned_users)
+    
+    db.session.add(chore)
+    db.session.commit()
+    
+    return jsonify(chore_to_dict(chore)), 201
+
+@app.route("/api/chores/<int:chore_id>/complete", methods=["POST"])
+@login_required
+def complete_chore_route(chore_id):
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+        
+    chore = Chore.query.filter_by(id=chore_id, group_id=user.group_id).first()
+    if not chore:
+        return jsonify({"error": "chore not found"}), 404
+        
+    chore.completed = True
+    
+    completion = ChoreCompletion(user_id=user.id, chore_id=chore.id)
+    db.session.add(completion)
+    
+    db.session.commit()
+    return jsonify(chore_to_dict(chore))
+
+@app.route("/api/chores/<int:chore_id>/auto-assign", methods=["POST"])
+@login_required
+def auto_assign_chore_route(chore_id):
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+        
+    chore = Chore.query.filter_by(id=chore_id, group_id=user.group_id).first()
+    if not chore:
+        return jsonify({"error": "chore not found"}), 404
+
+    if chore.assignments:
+        users = list(chore.assignments)
+        first = users.pop(0)
+        users.append(first)
+        chore.assignments = users
+        
+    chore.completed = False
+    db.session.commit()
+    
+    return jsonify(chore_to_dict(chore))
 # Chores API Routes are now in chores.py
 
 
@@ -869,4 +1021,5 @@ with app.app_context():
     db.create_all()
 
 if __name__ == '__main__':
+    app.run(debug=True, port=5001)
     app.run(debug=True, port=5000)

@@ -11,6 +11,17 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
+            --primary: #3498db;
+            --primary-dark: #2980b9;
+            --secondary: #95a5a6;
+            --secondary-dark: #7f8c8d;
+            --danger: #e74c3c;
+            --success: #27ae60;
+            --bg: #f5f5f7;
+            --card-bg: #fff;
+            --text-main: #2c3e50;
+            --text-light: #666;
+            --border: #eee;
             /* DoorDash Inspired Palette */
             --primary: #FF3008;
             /* DoorDash Red */
@@ -52,6 +63,7 @@
         }
 
         body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background: var(--bg);
             color: var(--text-main);
@@ -74,6 +86,9 @@
         }
 
         nav a {
+            color: #fff;
+            text-decoration: none;
+            margin-left: 1.5rem;
             color: var(--text-main);
             text-decoration: none;
             margin-left: 1.5rem;
@@ -87,6 +102,12 @@
         }
 
         .nav-brand {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        /* Layout */
             font-size: 1.5rem;
             font-weight: 700;
             color: var(--primary) !important;
@@ -106,6 +127,12 @@
 
         .card {
             background: var(--card-bg);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
             border-radius: var(--radius-lg);
             padding: 2rem;
             margin-bottom: 1.5rem;
@@ -139,6 +166,355 @@
 
         h1 {
             margin-bottom: 0.5rem;
+        }
+
+        h2 {
+            margin-bottom: 1rem;
+            font-size: 1.5rem;
+        }
+
+        .subtitle {
+            color: var(--text-light);
+            margin: 0;
+        }
+
+        /* Forms */
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: var(--text-main);
+            font-weight: 500;
+        }
+
+        input[type="text"],
+        input[type="email"],
+        input[type="password"],
+        input[type="number"],
+        input[type="date"],
+        select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        input:focus,
+        select:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        /* Buttons */
+        button,
+        .btn {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            text-decoration: none;
+            border: none;
+            transition: background 0.2s;
+            text-align: center;
+        }
+
+        .btn-primary,
+        button[type="submit"] {
+            background: var(--primary);
+            color: #fff;
+        }
+
+        .btn-primary:hover,
+        button[type="submit"]:hover {
+            background: var(--primary-dark);
+        }
+
+        .btn-primary:disabled,
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .btn-sm {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        /* Utilities */
+        .text-center {
+            text-align: center;
+        }
+
+        .mt-1 {
+            margin-top: 1rem;
+        }
+
+        .mt-2 {
+            margin-top: 2rem;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .flash {
+            padding: 1rem;
+            border-radius: 6px;
+            margin-bottom: 1rem;
+            background: var(--danger);
+            color: #fff;
+        }
+
+        .flash.success {
+            background: var(--success);
+        }
+
+        .hint {
+            color: #999;
+            font-size: 0.85rem;
+        }
+
+        .badge {
+            background: #e8f4ff;
+            color: var(--primary);
+            padding: 0.25rem 0.75rem;
+            border-radius: 1rem;
+            font-size: 0.85rem;
+            display: inline-block;
+        }
+
+        a.link {
+            color: var(--primary);
+            text-decoration: none;
+        }
+
+        a.link:hover {
+            text-decoration: underline;
+        }
+
+        /* Generic Lists */
+        .list-group {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .list-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .list-item:last-child {
+            border-bottom: none;
+        }
+
+        .list-item.selected {
+            background: #f0f7ff;
+            margin: 0 -1.5rem;
+            padding: 0.75rem 1.5rem;
+        }
+
+        /* Inline Form Inputs */
+        .input-transparent {
+            border: none;
+            background: transparent;
+            padding: 0.25rem;
+            transition: all 0.2s;
+        }
+
+        .input-transparent:focus {
+            background: #fff;
+            box-shadow: 0 0 0 2px var(--primary);
+            border-radius: 4px;
+            outline: none;
+        }
+
+        /* Controls */
+        .btn-icon {
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: #ccc;
+            font-size: 1.2rem;
+            padding: 0.25rem;
+            transition: color 0.2s;
+        }
+
+        .btn-icon:hover {
+            color: var(--danger);
+        }
+
+        .quantity-control {
+            display: flex;
+            align-items: center;
+            border-radius: 6px;
+            background: #f5f5f5;
+        }
+
+        .quantity-control button {
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            background: transparent;
+            color: var(--text-light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .quantity-control button:hover {
+            background: #e8e8e8;
+            border-radius: 4px;
+        }
+
+        .quantity-control output {
+            width: 30px;
+            text-align: center;
+            font-size: 0.9rem;
+        }
+
+
+        /* Layout Utils */
+        .flex-center {
+            display: flex;
+            align-items: center;
+        }
+
+        .flex-between {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .gap-1 {
+            gap: 0.5rem;
+        }
+
+        .gap-2 {
+            gap: 1rem;
+        }
+
+        /* Card Additions */
+        .card-footer {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+        }
+
+        /* Generic Components */
+        .btn-group {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .form-row input[type="text"] {
+            flex: 1;
+        }
+
+        .form-row input[type="number"] {
+            width: 80px;
+            text-align: center;
+        }
+
+        .form-row button {
+            width: auto;
+            font-size: 1.2rem;
+            padding: 0.5rem 1rem;
+        }
+
+        /* Input Group (e.g. Price Field) */
+        .input-group {
+            display: flex;
+            align-items: center;
+            background: #f5f5f5;
+            border-radius: 6px;
+            padding: 0 0.5rem;
+        }
+
+        .input-group span {
+            color: #999;
+            font-size: 0.85rem;
+        }
+
+        .input-group input {
+            width: 60px;
+            border: none;
+            background: transparent;
+            text-align: right;
+            padding: 0.35rem 0;
+        }
+
+        /* Drop Zone */
+        .drop-zone {
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            padding: 2rem;
+            text-align: center;
+            cursor: pointer;
+            background: #fafafa;
+            transition: all 0.2s;
+        }
+
+        .drop-zone:hover,
+        .drop-zone.dragover {
+            border-color: var(--primary);
+            background: #f0f7ff;
+        }
+
+        .preview-image {
+            max-width: 100%;
+            max-height: 250px;
+            border-radius: 4px;
+            margin-top: 1rem;
+        }
+
+        /* Message/Status */
+        .status-text {
+            margin-top: 0.5rem;
+            font-size: 0.85rem;
+        }
+
+        .status-text.error {
+            color: var(--danger);
+        }
+
+        .status-text.success {
+            color: var(--success);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-light);
+            width: 100%;
+        }
             font-size: 2rem;
         }
 
