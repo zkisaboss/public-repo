@@ -12,3 +12,27 @@
     <a href="{{ url_for('groceries') }}" class="btn btn-secondary mt-1">Back to Groceries</a>
 </div>
 {% endblock %}
+{% extends "base.html" %}
+{% block title %}Payments{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>Payments</h1>
+
+    <div class="payment-info">
+        <p>Grocery total: $0.00</p>
+        <p>Your share: $0.00</p>
+    </div>
+
+    <form action="{{ url_for('create_checkout_session') }}" method="POST">
+        <!-- $10 in cents -->
+        <input type="hidden" name="amount_cents" value="1000">
+        <button type="submit" class="btn">Pay your share</button>
+    </form>
+
+    <a href="{{ url_for('groceries') }}" class="btn btn-secondary mt-1">
+        Back to Groceries
+    </a>
+</div>
+{% endblock %}
+

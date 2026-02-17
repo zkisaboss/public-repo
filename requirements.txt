@@ -1,7 +1,11 @@
-flask
-flask_sqlalchemy
-python-dotenv
+Flask==3.1.2
+Flask-SQLAlchemy==3.1.1
+SQLAlchemy==2.0.46
+python-dotenv==1.2.1
+stripe
+requests==2.32.5
 Pillow
 anthropic
-werkzeug
 psycopg2-binary
+Werkzeug==3.1.5
+
