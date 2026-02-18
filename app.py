@@ -114,8 +114,6 @@ from datetime import datetime, date
 from dotenv import load_dotenv
 from PIL import Image
 import anthropic
-from flask_mail import Mail, Message
-from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
 
 # Load environment variables
@@ -163,20 +161,6 @@ def get_users():
         for u in users
     ])
 
-# Email Configuration
-app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
-app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
-app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'True') == 'True'
-app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
-app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
-app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'RoomSync <noreply@roomsync.app>')
-
-mail = Mail(app)
-
-# Initialize scheduler for automated reminders
-scheduler = BackgroundScheduler()
-scheduler.start()
-atexit.register(lambda: scheduler.shutdown())
 
 @app.route('/api/chores', methods=['GET'])
 @login_required
@@ -313,140 +297,6 @@ class ExpenseSplit(db.Model):
     
     # Relationship
     user = db.relationship('User', backref='expense_splits')
-
-
-class ExpenseReminder(db.Model):
-    """Track when reminders are sent for expenses."""
-    id = db.Column(db.Integer, primary_key=True)
-    expense_id = db.Column(db.Integer, db.ForeignKey('expense.id'), nullable=False)
-    split_id = db.Column(db.Integer, db.ForeignKey('expense_split.id'), nullable=False)
-    sent_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    reminder_type = db.Column(db.String(20), nullable=False)  # 'manual' or 'automated'
-    
-    # Relationships
-    expense = db.relationship('Expense', backref='reminders')
-    split = db.relationship('ExpenseSplit', backref='reminders')
-
-
-# ===== Email Reminder Functions =====
-
-def send_expense_reminder_email(debtor_email, debtor_name, creditor_name, amount, description):
-    """Send a reminder email to someone who owes money."""
-    try:
-        msg = Message(
-            subject=f"Payment Reminder: ${amount:.2f} owed to {creditor_name}",
-            recipients=[debtor_email]
-        )
-        
-        msg.body = f"""Hi {debtor_name},
-
-This is a friendly reminder that you have an outstanding expense in RoomSync.
-
-Expense Details:
-- Description: {description}
-- Amount Owed: ${amount:.2f}
-- Owed To: {creditor_name}
-
-Please settle this expense at your earliest convenience.
-
-Log in to RoomSync to view details: {request.url_root}
-
-Thanks,
-The RoomSync Team
-"""
-        
-        msg.html = f"""
-<html>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-    <h2 style="color: #4A90E2;">Payment Reminder</h2>
-    <p>Hi {debtor_name},</p>
-    <p>This is a friendly reminder that you have an outstanding expense in RoomSync.</p>
-    
-    <div style="background-color: #f4f4f4; padding: 15px; border-radius: 5px; margin: 20px 0;">
-        <h3 style="margin-top: 0; color: #4A90E2;">Expense Details</h3>
-        <p><strong>Description:</strong> {description}</p>
-        <p><strong>Amount Owed:</strong> <span style="font-size: 1.2em; color: #E74C3C;">${amount:.2f}</span></p>
-        <p><strong>Owed To:</strong> {creditor_name}</p>
-    </div>
-    
-    <p>Please settle this expense at your earliest convenience.</p>
-    <p><a href="{request.url_root}expenses" style="background-color: #4A90E2; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">View in RoomSync</a></p>
-    
-    <p style="color: #666; font-size: 0.9em; margin-top: 30px;">Thanks,<br>The RoomSync Team</p>
-</body>
-</html>
-"""
-        
-        mail.send(msg)
-        return True
-    except Exception as e:
-        print(f"Error sending email: {e}", file=sys.stderr)
-        return False
-
-
-def check_and_send_weekly_reminders():
-    """Automated job - checks for expenses older than 7 days and sends reminders."""
-    print(f"Running weekly reminder check at {datetime.utcnow()}", file=sys.stderr)
-    
-    try:
-        seven_days_ago = datetime.utcnow() - timedelta(days=7)
-        
-        splits = db.session.query(ExpenseSplit).join(Expense).filter(
-            Expense.created_at <= seven_days_ago,
-            ExpenseSplit.user_id != Expense.paid_by_user_id
-        ).all()
-        
-        reminders_sent = 0
-        for split in splits:
-            expense = split.expense
-            
-            recent_reminder = ExpenseReminder.query.filter(
-                ExpenseReminder.split_id == split.id,
-                ExpenseReminder.reminder_type == 'automated',
-                ExpenseReminder.sent_at >= seven_days_ago
-            ).first()
-            
-            if recent_reminder:
-                continue
-            
-            debtor = split.user
-            creditor = expense.paid_by
-            
-            success = send_expense_reminder_email(
-                debtor_email=debtor.email,
-                debtor_name=debtor.email.split('@')[0],
-                creditor_name=creditor.email.split('@')[0],
-                amount=split.amount,
-                description=expense.description
-            )
-            
-            if success:
-                reminder = ExpenseReminder(
-                    expense_id=expense.id,
-                    split_id=split.id,
-                    reminder_type='automated'
-                )
-                db.session.add(reminder)
-                reminders_sent += 1
-        
-        db.session.commit()
-        print(f"Sent {reminders_sent} automated reminders", file=sys.stderr)
-        
-    except Exception as e:
-        print(f"Error in automated reminders: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        db.session.rollback()
-
-
-# Schedule the automated reminder job to run daily at 9 AM
-scheduler.add_job(
-    func=check_and_send_weekly_reminders,
-    trigger='cron',
-    hour=9,
-    minute=0,
-    id='weekly_expense_reminders'
-)
 
 
 # Auth helpers
