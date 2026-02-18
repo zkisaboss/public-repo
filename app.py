@@ -29,11 +29,13 @@ class Payment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
+    expense_id = db.Column(db.Integer, db.ForeignKey('expenses.id'), nullable=True)
+
     amount_cents = db.Column(db.Integer, nullable=False)
     currency = db.Column(db.String(3), default='usd')
     status = db.Column(db.String(20), default='pending')
-    stripe_session_id = db.Column(db.String(255))
-    stripe_payment_intent_id = db.Column(db.String(255))
+    stripe_session_id = db.Column(db.String(255), unique=True, nullable=False)
+    stripe_payment_intent_id = db.Column(db.String(255), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class GroceryItem(db.Model):
@@ -56,6 +58,8 @@ class Expense(db.Model):
     group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     splits = relationship('ExpenseSplit', backref='expense', cascade="all, delete-orphan")
+    payments = relationship('Payment', backref='expense', lazy=True)
+
 
 class ExpenseSplit(db.Model):
     __tablename__ = 'expense_splits'
@@ -107,6 +111,9 @@ import base64
 
 from dotenv import load_dotenv
 import anthropic
+from flask_mail import Mail, Message
+from apscheduler.schedulers.background import BackgroundScheduler
+import atexit
 
 # Load environment variables
 load_dotenv()
@@ -145,6 +152,41 @@ def auto_assign_chore(chore_id):
     if not user or not user.group_id:
         return jsonify({'error': 'Unauthorized'}), 401
 
+# Email Configuration
+app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
+app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
+app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'True') == 'True'
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'RoomSync <noreply@roomsync.app>')
+
+mail = Mail(app)
+
+# Initialize scheduler for automated reminders
+scheduler = BackgroundScheduler()
+scheduler.start()
+atexit.register(lambda: scheduler.shutdown())
+
+@app.route('/api/chores', methods=['GET'])
+@login_required
+def get_chores():
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+        
+    chores = Chore.query.filter_by(group_id=user.group_id).order_by(Chore.next_due_date).all()
+    result = []
+    for chore in chores:
+        result.append({
+            'choreId': chore.id,
+            'name': chore.name,
+            # Format date as YYYY-MM-DD
+            'nextDueBy': chore.next_due_date.isoformat() if chore.next_due_date else None,
+            'completed': chore.completed,
+            'assignedUsers': [{'name': u.email.split('@')[0]} for u in chore.assignees],
+            'lastCompletedBy': [{'name': chore.last_completed_by.email.split('@')[0]}] if chore.last_completed_by else []
+        })
+    return jsonify(result)
 
 class ChoreCompletion(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -156,6 +198,205 @@ class ChoreCompletion(db.Model):
 
 
 # Auth helpers
+# Association table for ChoreAssignments
+chore_assignments = db.Table('chore_assignments',
+    db.Column('user_id', db.Integer, db.ForeignKey('user.id'), primary_key=True),
+    db.Column('chore_id', db.Integer, db.ForeignKey('chore.id'), primary_key=True)
+)
+
+
+class Chore(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    next_due_date = db.Column(db.Date, nullable=True)
+    completed = db.Column(db.Boolean, default=False)
+    group_id = db.Column(db.Integer, db.ForeignKey('group.id'), nullable=False)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+
+    # Relationships
+    assignments = db.relationship('User', secondary=chore_assignments, lazy='subquery',
+        backref=db.backref('assigned_chores', lazy=True))
+    completions = db.relationship('ChoreCompletion', backref='chore', lazy=True, cascade="all, delete-orphan")
+
+
+class ChoreCompletion(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    chore_id = db.Column(db.Integer, db.ForeignKey('chore.id'), nullable=False)
+    completed_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref='chore_completions')
+
+
+# Add these models after ChoreCompletion class
+
+class Expense(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    description = db.Column(db.String(200), nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    paid_by_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    group_id = db.Column(db.Integer, db.ForeignKey('group.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    paid_by = db.relationship('User', backref='expenses_paid')
+    splits = db.relationship('ExpenseSplit', backref='expense', lazy=True, cascade="all, delete-orphan")
+
+
+class ExpenseSplit(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    expense_id = db.Column(db.Integer, db.ForeignKey('expense.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    percentage = db.Column(db.Float, nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    
+    # Relationship
+    user = db.relationship('User', backref='expense_splits')
+
+
+class ExpenseReminder(db.Model):
+    """Track when reminders are sent for expenses."""
+    id = db.Column(db.Integer, primary_key=True)
+    expense_id = db.Column(db.Integer, db.ForeignKey('expense.id'), nullable=False)
+    split_id = db.Column(db.Integer, db.ForeignKey('expense_split.id'), nullable=False)
+    sent_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    reminder_type = db.Column(db.String(20), nullable=False)  # 'manual' or 'automated'
+    
+    # Relationships
+    expense = db.relationship('Expense', backref='reminders')
+    split = db.relationship('ExpenseSplit', backref='reminders')
+
+
+# ===== Email Reminder Functions =====
+
+def send_expense_reminder_email(debtor_email, debtor_name, creditor_name, amount, description):
+    """Send a reminder email to someone who owes money."""
+    try:
+        msg = Message(
+            subject=f"Payment Reminder: ${amount:.2f} owed to {creditor_name}",
+            recipients=[debtor_email]
+        )
+        
+        msg.body = f"""Hi {debtor_name},
+
+This is a friendly reminder that you have an outstanding expense in RoomSync.
+
+Expense Details:
+- Description: {description}
+- Amount Owed: ${amount:.2f}
+- Owed To: {creditor_name}
+
+Please settle this expense at your earliest convenience.
+
+Log in to RoomSync to view details: {request.url_root}
+
+Thanks,
+The RoomSync Team
+"""
+        
+        msg.html = f"""
+<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <h2 style="color: #4A90E2;">Payment Reminder</h2>
+    <p>Hi {debtor_name},</p>
+    <p>This is a friendly reminder that you have an outstanding expense in RoomSync.</p>
+    
+    <div style="background-color: #f4f4f4; padding: 15px; border-radius: 5px; margin: 20px 0;">
+        <h3 style="margin-top: 0; color: #4A90E2;">Expense Details</h3>
+        <p><strong>Description:</strong> {description}</p>
+        <p><strong>Amount Owed:</strong> <span style="font-size: 1.2em; color: #E74C3C;">${amount:.2f}</span></p>
+        <p><strong>Owed To:</strong> {creditor_name}</p>
+    </div>
+    
+    <p>Please settle this expense at your earliest convenience.</p>
+    <p><a href="{request.url_root}expenses" style="background-color: #4A90E2; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">View in RoomSync</a></p>
+    
+    <p style="color: #666; font-size: 0.9em; margin-top: 30px;">Thanks,<br>The RoomSync Team</p>
+</body>
+</html>
+"""
+        
+        mail.send(msg)
+        return True
+    except Exception as e:
+        print(f"Error sending email: {e}", file=sys.stderr)
+        return False
+
+
+def check_and_send_weekly_reminders():
+    """Automated job - checks for expenses older than 7 days and sends reminders."""
+    print(f"Running weekly reminder check at {datetime.utcnow()}", file=sys.stderr)
+    
+    try:
+        seven_days_ago = datetime.utcnow() - timedelta(days=7)
+        
+        splits = db.session.query(ExpenseSplit).join(Expense).filter(
+            Expense.created_at <= seven_days_ago,
+            ExpenseSplit.user_id != Expense.paid_by_user_id
+        ).all()
+        
+        reminders_sent = 0
+        for split in splits:
+            expense = split.expense
+            
+            recent_reminder = ExpenseReminder.query.filter(
+                ExpenseReminder.split_id == split.id,
+                ExpenseReminder.reminder_type == 'automated',
+                ExpenseReminder.sent_at >= seven_days_ago
+            ).first()
+            
+            if recent_reminder:
+                continue
+            
+            debtor = split.user
+            creditor = expense.paid_by
+            
+            success = send_expense_reminder_email(
+                debtor_email=debtor.email,
+                debtor_name=debtor.email.split('@')[0],
+                creditor_name=creditor.email.split('@')[0],
+                amount=split.amount,
+                description=expense.description
+            )
+            
+            if success:
+                reminder = ExpenseReminder(
+                    expense_id=expense.id,
+                    split_id=split.id,
+                    reminder_type='automated'
+                )
+                db.session.add(reminder)
+                reminders_sent += 1
+        
+        db.session.commit()
+        print(f"Sent {reminders_sent} automated reminders", file=sys.stderr)
+        
+    except Exception as e:
+        print(f"Error in automated reminders: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        db.session.rollback()
+
+
+# Schedule the automated reminder job to run daily at 9 AM
+scheduler.add_job(
+    func=check_and_send_weekly_reminders,
+    trigger='cron',
+    hour=9,
+    minute=0,
+    id='weekly_expense_reminders'
+)
+
+
+# Auth helpers
+def login_required(f):
+    @wraps(f)
+    def wrap(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return wrap
     chore = Chore.query.filter_by(id=chore_id, group_id=user.group_id).first()
     if not chore:
         return jsonify({'error': 'Chore not found'}), 404
@@ -742,7 +983,19 @@ def auto_assign_chore_route(chore_id):
     return jsonify(chore_to_dict(chore))
 # Chores API Routes are now in chores.py
 
+    if chore.assignments:
+        users = list(chore.assignments)
+        first = users.pop(0)
+        users.append(first)
+        chore.assignments = users
+        
+    chore.completed = False
+    db.session.commit()
+    
+    return jsonify(chore_to_dict(chore))
+# Chores API Routes are now in chores.py
 
+# ===== Payment API Routes =====
 
 @app.route("/payments")
 @login_required
@@ -779,16 +1032,68 @@ def get_expenses():
             'paidBy': {
                 'user_id': expense.paid_by_user_id,
                 'name': expense.paid_by.email.split('@')[0]
-            },
-            'splits': [{
+             },
+             'splits': [{
                 'user_id': s.user_id,
                 'user_name': s.user.email.split('@')[0],
                 'percentage': float(s.percentage),
                 'amount': float(s.amount)
-            } for s in expense.splits]
+            } for s in expense.splits],
+
+            'payments': [{
+                'payment_id': p.id,
+                'user_id': p.user_id,
+                'amount_cents': p.amount_cents,
+                'status': p.status,
+                'transaction_id': p.stripe_session_id,
+                'created_at': p.created_at.isoformat() if p.created_at else None
+            } for p in expense.payments]
         })
-    
+
     return jsonify(result)
+
+
+
+@app.route("/api/payments", methods=["GET"])
+@login_required
+def get_payments():
+    """Return payment history for the current user's group."""
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    payments = (
+        Payment.query
+        .filter_by(group_id=user.group_id)
+        .order_by(Payment.created_at.desc())
+        .all()
+    )
+
+    result = []
+    for p in payments:
+        payer = User.query.get(p.user_id)
+
+        status = (p.status or "pending").lower()
+        if status in ["paid", "succeeded", "success"]:
+            status = "completed"
+
+        result.append({
+            "payment_id": p.id,
+            "expense_id": getattr(p, "expense_id", None),
+            "payer_user_id": p.user_id,
+            "payer_name": (payer.email.split("@")[0] if payer else str(p.user_id)),
+            "amount": (float(p.amount_cents) / 100.0) if p.amount_cents is not None else 0.0,
+            "currency": p.currency or "usd",
+            "status": status,
+            "transaction_id": p.stripe_session_id,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        })
+
+    return jsonify(result), 200
+
+
+    
+
 
 
 @app.route('/api/expenses', methods=['POST'])
@@ -894,10 +1199,176 @@ def delete_expense(expense_id):
     db.session.commit()
     return jsonify({'success': True})
 
+@app.route("/api/expenses/<int:expense_id>/pay", methods=["POST"])
+@login_required
+def pay_expense(expense_id):
+    """
+    Create a Stripe Checkout Session for the current user's share of an expense,
+    create a pending Payment record, and return checkout_url as JSON.
+    """
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    # Make sure expense is in the same group
+    expense = Expense.query.filter_by(id=expense_id, group_id=user.group_id).first()
+    if not expense:
+        return jsonify({"error": "Expense not found"}), 404
+
+    # Find this user's split for the expense
+    split = ExpenseSplit.query.filter_by(expense_id=expense.id, user_id=user.id).first()
+    if not split:
+        return jsonify({"error": "You are not part of this expense"}), 403
+
+    amount_cents = int(round(float(split.amount) * 100))
+    if amount_cents <= 0:
+        return jsonify({"error": "Nothing to pay for this expense"}), 400
+
+    # Optional: prevent duplicate "completed" payment for same user+expense
+    existing_paid = Payment.query.filter_by(
+        user_id=user.id,
+        group_id=user.group_id,
+        expense_id=expense.id,
+        status="completed"
+    ).first()
+    if existing_paid:
+        return jsonify({"error": "You already paid this expense"}), 400
+
+    # If you want: prevent multiple pending sessions piling up
+    existing_pending = Payment.query.filter_by(
+        user_id=user.id,
+        group_id=user.group_id,
+        expense_id=expense.id,
+        status="pending"
+    ).first()
+    if existing_pending and existing_pending.stripe_session_id:
+        # You could either reuse it (if you store URL) or just create new.
+        # We'll just continue and create a new session.
+        pass
+
+    # ---------------------------
+    # Stripe Checkout Session
+    # ---------------------------
+
+    try:
+        checkout_session = stripe.checkout.Session.create(
+            mode="payment",
+            payment_method_types=["card"],
+            line_items=[
+                {
+                    "price_data": {
+                        "currency": "usd",
+                        "product_data": {
+                            "name": f"Expense: {expense.description}",
+                            "description": f"Your share for expense #{expense.id}",
+                        },
+                        "unit_amount": amount_cents,
+                    },
+                    "quantity": 1,
+                }
+            ],
+            success_url=url_for("payments_success", _external=True)
+                        + "?session_id={CHECKOUT_SESSION_ID}",
+            cancel_url=url_for("payments_cancel", _external=True),
+            metadata={
+                "expense_id": str(expense.id),
+                "user_id": str(user.id),
+                "group_id": str(user.group_id),
+            },
+        )
+    except Exception as e:
+        return jsonify({"error": f"Stripe error: {str(e)}"}), 500
+
+    # ---------------------------
+    # DB Payment record (pending)
+    # ---------------------------
+    payment = Payment(
+        user_id=user.id,
+        group_id=user.group_id,
+        expense_id=expense.id,
+        amount_cents=amount_cents,
+        currency="usd",
+        status="pending",
+        stripe_session_id=checkout_session.id,   # IMPORTANT: store session ID, not url
+    )
+
+    db.session.add(payment)
+    db.session.commit()
+
+    # Return JSON so frontend can redirect:
+    return jsonify({
+        "success": True,
+        "checkout_url": checkout_session.url,
+        "payment": {
+            "payment_id": payment.id,
+            "expense_id": payment.expense_id,
+            "amount_cents": payment.amount_cents,
+            "status": payment.status,
+            "transaction_id": payment.stripe_session_id,
+            "created_at": payment.created_at.isoformat() if payment.created_at else None
+        }
+    }), 201
+
+
+@app.route('/api/expenses/<int:expense_id>/remind/<int:user_id>', methods=['POST'])
+@login_required
+def send_expense_reminder(expense_id, user_id):
+    """Manual reminder - send email to specific user about their share of an expense."""
+    current_user = get_current_user()
+    if not current_user or not current_user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    expense = Expense.query.filter_by(
+        id=expense_id,
+        group_id=current_user.group_id
+    ).first()
+    
+    if not expense:
+        return jsonify({'error': 'Expense not found'}), 404
+    
+    split = ExpenseSplit.query.filter_by(
+        expense_id=expense_id,
+        user_id=user_id
+    ).first()
+    
+    if not split:
+        return jsonify({'error': 'User not part of this expense'}), 404
+    
+    if user_id == expense.paid_by_user_id:
+        return jsonify({'error': 'Cannot remind the person who paid'}), 400
+    
+    debtor = User.query.get(user_id)
+    creditor = expense.paid_by
+    
+    success = send_expense_reminder_email(
+        debtor_email=debtor.email,
+        debtor_name=debtor.email.split('@')[0],
+        creditor_name=creditor.email.split('@')[0],
+        amount=split.amount,
+        description=expense.description
+    )
+    
+    if success:
+        reminder = ExpenseReminder(
+            expense_id=expense_id,
+            split_id=split.id,
+            reminder_type='manual'
+        )
+        db.session.add(reminder)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Reminder sent to {debtor.email.split("@")[0]}'
+        }), 200
+    else:
+        return jsonify({'error': 'Failed to send reminder'}), 500
+
 
 # Init
 with app.app_context():
     db.create_all()
 
 if __name__ == '__main__':
+    app.run(debug=True, port=5001)
     app.run(debug=True, port=5000)
