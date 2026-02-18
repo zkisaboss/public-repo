@@ -156,13 +156,6 @@ class ChoreCompletion(db.Model):
 
 
 # Auth helpers
-def login_required(f):
-    @wraps(f)
-    def wrap(*args, **kwargs):
-        if 'user_id' not in session:
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return wrap
     chore = Chore.query.filter_by(id=chore_id, group_id=user.group_id).first()
     if not chore:
         return jsonify({'error': 'Chore not found'}), 404
@@ -907,5 +900,4 @@ with app.app_context():
     db.create_all()
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5001)
     app.run(debug=True, port=5000)
