@@ -77,16 +77,17 @@ chore_assignments = db.Table('chore_assignments',
 )
 
 class Chore(db.Model):
-    __tablename__ = 'chores'
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
-    next_due_date = db.Column(db.Date) # stored as date
+    name = db.Column(db.String(200), nullable=False)
+    next_due_date = db.Column(db.Date, nullable=True)
     completed = db.Column(db.Boolean, default=False)
-    # last_completed_by logic: simple string or FK for now
-    last_completed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
-    last_completed_by = relationship('User', foreign_keys=[last_completed_by_id])
-    assignees = relationship('User', secondary=chore_assignments, backref='assigned_chores')
+    group_id = db.Column(db.Integer, db.ForeignKey('group.id'), nullable=False)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+
+    # Relationships
+    assignments = db.relationship('User', secondary=chore_assignments, lazy='subquery',
+        backref=db.backref('assigned_chores', lazy=True))
+    completions = db.relationship('ChoreCompletion', backref='chore', lazy=True, cascade="all, delete-orphan")
 
 
 # Auth helpers
@@ -107,12 +108,8 @@ import re
 import stripe
 import json
 import base64
-import re
-import io
 
-from datetime import datetime, date
 from dotenv import load_dotenv
-from PIL import Image
 import anthropic
 from flask_mail import Mail, Message
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -148,20 +145,12 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 db.init_app(app)
 # --- CHORES API ---
-
-@app.route('/api/users', methods=['GET'])
+@app.route('/api/chores/<int:chore_id>/auto-assign', methods=['POST'])
 @login_required
-def get_users():
+def auto_assign_chore(chore_id):
     user = get_current_user()
     if not user or not user.group_id:
         return jsonify({'error': 'Unauthorized'}), 401
-    
-    users = User.query.filter_by(group_id=user.group_id).all()
-    # Filter out current user? Typically optional but UI allows multi select so list all.
-    return jsonify([
-        {'user_id': u.id, 'name': u.email.split('@')[0]} 
-        for u in users
-    ])
 
 # Email Configuration
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
@@ -199,65 +188,16 @@ def get_chores():
         })
     return jsonify(result)
 
-@app.route('/api/chores', methods=['POST'])
-@login_required
-def create_chore():
-    user = get_current_user()
-    if not user or not user.group_id:
-        return jsonify({'error': 'Unauthorized'}), 401
-        
-    data = request.get_json()
-    name = data.get('name')
-    if not name:
-        return jsonify({'error': 'Name required'}), 400
-        
-    next_due = None
-    if val := data.get('nextDueBy'):
-        try:
-            next_due = date.fromisoformat(val)
-        except ValueError:
-            pass
-            
-    chore = Chore(
-        name=name,
-        group_id=user.group_id,
-        next_due_date=next_due
-    )
-    
-    if 'assignedUserIds' in data:
-        ids = data['assignedUserIds']
-        # Ensure ids is a list of methods
-        if isinstance(ids, list):
-           users = User.query.filter(User.id.in_(ids)).all()
-           chore.assignees.extend(users)
-        
-    db.session.add(chore)
-    db.session.commit()
-    return jsonify({'success': True})
+class ChoreCompletion(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    chore_id = db.Column(db.Integer, db.ForeignKey('chore.id'), nullable=False)
+    completed_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-@app.route('/api/chores/<int:chore_id>/complete', methods=['POST'])
-@login_required
-def complete_chore(chore_id):
-    user = get_current_user()
-    if not user or not user.group_id:
-        return jsonify({'error': 'Unauthorized'}), 401
-        
-    chore = Chore.query.filter_by(id=chore_id, group_id=user.group_id).first()
-    if not chore:
-        return jsonify({'error': 'Chore not found'}), 404
-        
-    chore.completed = True
-    chore.last_completed_by = user
-    db.session.commit()
-    return jsonify({'success': True})
+    user = db.relationship('User', backref='chore_completions')
 
-@app.route('/api/chores/<int:chore_id>/auto-assign', methods=['POST'])
-@login_required
-def auto_assign_chore(chore_id):
-    user = get_current_user()
-    if not user or not user.group_id:
-        return jsonify({'error': 'Unauthorized'}), 401
 
+# Auth helpers
 # Association table for ChoreAssignments
 chore_assignments = db.Table('chore_assignments',
     db.Column('user_id', db.Integer, db.ForeignKey('user.id'), primary_key=True),
@@ -610,8 +550,6 @@ def stripe_webhook():
     return jsonify({"received": True}), 200
 
 
-
-
 # Group management
 @app.route('/group', methods=['GET', 'POST'])
 @login_required
@@ -719,7 +657,6 @@ def expenses():
     return render_template('expenses.html', group=user.group)
 
 # Grocery Receipt OCR - Anthropic Claude
-
 
 
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
@@ -1033,6 +970,18 @@ def auto_assign_chore_route(chore_id):
     chore = Chore.query.filter_by(id=chore_id, group_id=user.group_id).first()
     if not chore:
         return jsonify({"error": "chore not found"}), 404
+
+    if chore.assignments:
+        users = list(chore.assignments)
+        first = users.pop(0)
+        users.append(first)
+        chore.assignments = users
+        
+    chore.completed = False
+    db.session.commit()
+    
+    return jsonify(chore_to_dict(chore))
+# Chores API Routes are now in chores.py
 
     if chore.assignments:
         users = list(chore.assignments)
