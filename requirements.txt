@@ -10,3 +10,5 @@ psycopg2-binary
 Werkzeug==3.1.5
 Flask-Mail==0.9.1
 APScheduler==3.10.4
+google-auth
+pytest
