@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+
+{% block title %}Household Chores{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<header class="page-header">
+  <h1>Household Chores</h1>
+  <p class="subtitle">Manage shared tasks</p>
+</header>
+
+<!-- Create Chore Form -->
+<section class="card create-chore">
+  <h2>Create Chore</h2>
+  <div class="form-row-flexible">
+    <input id="chore-name" type="text" placeholder="Chore name" aria-label="Chore Name" class="flex-2 min-w-140" />
+    <input id="chore-due" type="date" aria-label="Due Date" class="flex-1 min-w-120" />
+    <select id="assigned-users" multiple aria-label="Assign Users" class="flex-2 min-w-140"></select>
+    <button id="add-chore-btn" class="btn-primary">Add</button>
+  </div>
+  <p class="hint">Hold Ctrl (Cmd on Mac) to select multiple users.</p>
+</section>
+
+<!-- Chore List -->
+<section class="card chore-list">
+  <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <h2 style="margin: 0;">Chore List</h2>
+  </header>
+  <div id="chore-list-container"></div>
+</section>
+
+<a href="{{ url_for('home') }}" class="back-link" style="margin-top: 1rem; color: #666; display: inline-block;">
+  ← Back
+</a>
+
+<script>
+  /* ==================== Constants ==================== */
+
+  const API_BASE = "/api/chores";
+  const USERS_API = "/api/users";
+
+  /* ==================== State ==================== */
+
+  let allUsers = [];
+
+  /* ==================== DOM Elements ==================== */
+
+  const listContainer = document.getElementById("chore-list-container");
+  const nameInput = document.getElementById("chore-name");
+  const dueInput = document.getElementById("chore-due");
+  const addBtn = document.getElementById("add-chore-btn");
+  const assignedSelect = document.getElementById("assigned-users");
+
+  /* ==================== API Functions ==================== */
+
+  async function loadUsers() {
+    const res = await fetch(USERS_API);
+    allUsers = await res.json();
+
+    assignedSelect.innerHTML = "";
+
+    allUsers.forEach((user) => {
+      const opt = document.createElement("option");
+      opt.value = user.user_id;
+      opt.textContent = user.name;
+      assignedSelect.appendChild(opt);
+    });
+  }
+
+  async function fetchChores() {
+    const res = await fetch(API_BASE);
+    const data = await res.json();
+    renderChores(data);
+  }
+
+  async function createChore() {
+    const name = nameInput.value.trim();
+    const nextDueBy = dueInput.value || null;
+    const assignedUserIds = getSelectedAssignedUserIds();
+
+    if (!name) return;
+
+    const res = await fetch(API_BASE, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, nextDueBy, assignedUserIds }),
+    });
+
+    if (res.ok) {
+      nameInput.value = "";
+      dueInput.value = "";
+      assignedSelect.selectedIndex = -1;
+      await fetchChores();
+    }
+  }
+
+  async function completeChore(choreId, completedByUserId) {
+    if (!completedByUserId) {
+      alert("Please select who completed this chore.");
+      return;
+    }
+
+    const res = await fetch(`${API_BASE}/${choreId}/complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ completedByUserId: parseInt(completedByUserId, 10) }),
+    });
+
+    if (res.ok) {
+      await fetchChores();
+    }
+  }
+
+  async function autoAssignChore(choreId) {
+    const res = await fetch(`${API_BASE}/${choreId}/auto-assign`, {
+      method: "POST",
+    });
+
+    if (res.ok) {
+      await fetchChores();
+    }
+  }
+
+  /* ==================== Helper Functions ==================== */
+
+  function getSelectedAssignedUserIds() {
+    return Array.from(assignedSelect.selectedOptions).map((opt) =>
+      parseInt(opt.value, 10)
+    );
+  }
+
+  function createUserDropdown(choreId, assignedUsers) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "completion-controls";
+    wrapper.style.cssText = "display: flex; gap: 0.5rem; align-items: center; width: 100%;";
+
+    const select = document.createElement("select");
+    select.id = `complete-user-${choreId}`;
+    select.className = "completion-user-select";
+    select.style.cssText = "flex: 1; padding: 0.25rem 0.5rem; border-radius: 4px; border: 1px solid #ccc;";
+
+    // Default option
+    const defaultOpt = document.createElement("option");
+    defaultOpt.value = "";
+    defaultOpt.textContent = "Who did it?";
+    select.appendChild(defaultOpt);
+
+    // Populate with assigned users first (if any), then all users
+    const usersToShow = assignedUsers && assignedUsers.length > 0 ? assignedUsers : allUsers;
+
+    usersToShow.forEach((user) => {
+      const opt = document.createElement("option");
+      opt.value = user.user_id;
+      opt.textContent = user.name;
+      select.appendChild(opt);
+    });
+
+    // If showing only assigned users, add separator and other users
+    if (assignedUsers && assignedUsers.length > 0) {
+      const assignedIds = assignedUsers.map(u => u.user_id);
+      const otherUsers = allUsers.filter(u => !assignedIds.includes(u.user_id));
+
+      if (otherUsers.length > 0) {
+        const separator = document.createElement("option");
+        separator.disabled = true;
+        separator.textContent = "── Other users ──";
+        select.appendChild(separator);
+
+        otherUsers.forEach((user) => {
+          const opt = document.createElement("option");
+          opt.value = user.user_id;
+          opt.textContent = user.name;
+          select.appendChild(opt);
+        });
+      }
+    }
+
+    const completeBtn = document.createElement("button");
+    completeBtn.textContent = "Done";
+    completeBtn.className = "btn-sm btn-primary";
+    completeBtn.style.cssText = "white-space: nowrap;";
+    completeBtn.onclick = () => completeChore(choreId, select.value);
+
+    wrapper.appendChild(select);
+    wrapper.appendChild(completeBtn);
+
+    return wrapper;
+  }
+
+  /* ==================== Rendering ==================== */
+
+  function renderChores(chores) {
+    listContainer.innerHTML = "";
+
+    if (!chores.length) {
+      listContainer.innerHTML = `
+                <p class="text-center" style="color: #999; padding: 2rem;">
+                    No chores yet. Add one above.
+                </p>
+            `;
+      return;
+    }
+
+    chores.forEach((chore) => {
+      const div = document.createElement("div");
+      div.className = "list-item-complex";
+
+      // Build chore info
+      const info = document.createElement("div");
+      info.className = "item-info";
+
+      const assignedNames = (chore.assignedUsers || [])
+        .map((u) => u.name)
+        .join(", ") || "None";
+
+      const lastCompletedNames = (chore.lastCompletedBy || [])
+        .map((u) => u.name)
+        .join(", ") || "None";
+
+      const statusBadge = chore.completed
+        ? '<span class="badge" style="background: #d4edda; color: #155724;">Completed</span>'
+        : '<span class="badge" style="background: #fff3cd; color: #856404;">Pending</span>';
+
+      const lastDoneHtml = chore.lastCompletedBy.length
+        ? `<div class="item-subtitle"><strong>Last done by:</strong> ${lastCompletedNames}</div>`
+        : "";
+
+      info.innerHTML = `
+                <div class="item-info-row">
+                    <span class="item-title">${chore.name}</span>
+                    ${statusBadge}
+                </div>
+                <div class="item-subtitle"><strong>Due:</strong> ${chore.nextDueBy || "No due date"}</div>
+                <div class="item-subtitle"><strong>Assigned:</strong> ${assignedNames}</div>
+                ${lastDoneHtml}
+            `;
+
+      // Build action buttons
+      const actions = document.createElement("div");
+      actions.className = "item-actions vertical";
+
+      if (!chore.completed) {
+        // Add user selection dropdown with complete button
+        const completionControls = createUserDropdown(chore.choreId, chore.assignedUsers);
+        actions.appendChild(completionControls);
+      }
+
+      const autoBtn = document.createElement("button");
+      autoBtn.textContent = "Rotate / Next";
+      autoBtn.className = "btn-sm btn-secondary w-100";
+      autoBtn.onclick = () => autoAssignChore(chore.choreId);
+      actions.appendChild(autoBtn);
+
+      // Assemble and append
+      div.appendChild(info);
+      div.appendChild(actions);
+      listContainer.appendChild(div);
+    });
+  }
+
+  /* ==================== Event Listeners & Initialization ==================== */
+
+  addBtn.addEventListener("click", createChore);
+
+  // Initial load and periodic refresh
+  loadUsers().then(fetchChores);
+  setInterval(fetchChores, 3000);
+</script>
+{% endblock %}

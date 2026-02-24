@@ -43,9 +43,12 @@
     </header>
 
     <form id="addItemForm" class="form-row">
-        <input type="text" name="name" placeholder="Add item..." required class="input-transparent"
-            style="background:#f5f5f5; border:1px solid #ddd;">
-        <input type="number" name="quantity" value="1" min="1">
+        <input type="text" name="name" placeholder="Add item..." required class="form-input">
+        <fieldset class="quantity-control">
+            <button type="button" data-action="decrement">−</button>
+            <output id="addItemQty">1</output>
+            <button type="button" data-action="increment">+</button>
+        </fieldset>
         <button type="submit">+</button>
     </form>
 
@@ -274,15 +277,18 @@
             const name = form.name.value.trim();
             if (!name) return;
             try {
+                const qtyOutput = $("#addItemQty", form);
+                const quantity = parseInt(qtyOutput.textContent) || 1;
+
                 const item = await api("/groceries/add", "POST", {
                     name,
-                    quantity: parseInt(form.quantity.value) || 1,
+                    quantity,
                     price: null
                 });
                 $(".empty-state", el.groceryList)?.remove();
                 el.groceryList.appendChild(createItem(item));
                 form.reset();
-                form.quantity.value = "1";
+                qtyOutput.textContent = "1";
                 form.name.focus();
                 updateItemCount();
             } catch (e) {
@@ -353,6 +359,21 @@
         });
 
         // Event: Add item form
+        el.addItemForm.addEventListener("click", (e) => {
+            if (e.target.tagName !== "BUTTON") return;
+            const action = e.target.dataset.action;
+            if (!action) return; // e.g. submit button
+
+            const output = $("#addItemQty", el.addItemForm);
+            let qty = parseInt(output.textContent) || 1;
+
+            if (action === "increment") {
+                output.textContent = ++qty;
+            } else if (action === "decrement" && qty > 1) {
+                output.textContent = --qty;
+            }
+        });
+
         el.addItemForm.addEventListener("submit", addItem);
 
         // Event: Grocery list
