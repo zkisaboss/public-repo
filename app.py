@@ -38,6 +38,19 @@ class Payment(db.Model):
     stripe_payment_intent_id = db.Column(db.String(255), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class Notification(db.Model):
+    __tablename__ = 'notifications'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
+    type = db.Column(db.String(50), nullable=False)  # 'expense', 'chore', 'grocery', 'payment'
+    title = db.Column(db.String(200), nullable=False)
+    message = db.Column(db.String(500), nullable=False)
+    is_read = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    related_id = db.Column(db.Integer, nullable=True)
+    user = relationship('User', backref='notifications')
+
 class GroceryItem(db.Model):
     __tablename__ = 'grocery_items'
     id = db.Column(db.Integer, primary_key=True)
@@ -111,8 +124,6 @@ import base64
 
 from dotenv import load_dotenv
 import anthropic
-from flask_mail import Mail, Message
-from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
 
 # Load environment variables
@@ -151,21 +162,6 @@ def auto_assign_chore(chore_id):
     user = get_current_user()
     if not user or not user.group_id:
         return jsonify({'error': 'Unauthorized'}), 401
-
-# Email Configuration
-app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
-app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
-app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'True') == 'True'
-app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
-app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
-app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'RoomSync <noreply@roomsync.app>')
-
-mail = Mail(app)
-
-# Initialize scheduler for automated reminders
-scheduler = BackgroundScheduler()
-scheduler.start()
-atexit.register(lambda: scheduler.shutdown())
 
 @app.route('/api/chores', methods=['GET'])
 @login_required
@@ -255,140 +251,6 @@ class ExpenseSplit(db.Model):
     user = db.relationship('User', backref='expense_splits')
 
 
-class ExpenseReminder(db.Model):
-    """Track when reminders are sent for expenses."""
-    id = db.Column(db.Integer, primary_key=True)
-    expense_id = db.Column(db.Integer, db.ForeignKey('expense.id'), nullable=False)
-    split_id = db.Column(db.Integer, db.ForeignKey('expense_split.id'), nullable=False)
-    sent_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    reminder_type = db.Column(db.String(20), nullable=False)  # 'manual' or 'automated'
-    
-    # Relationships
-    expense = db.relationship('Expense', backref='reminders')
-    split = db.relationship('ExpenseSplit', backref='reminders')
-
-
-# ===== Email Reminder Functions =====
-
-def send_expense_reminder_email(debtor_email, debtor_name, creditor_name, amount, description):
-    """Send a reminder email to someone who owes money."""
-    try:
-        msg = Message(
-            subject=f"Payment Reminder: ${amount:.2f} owed to {creditor_name}",
-            recipients=[debtor_email]
-        )
-        
-        msg.body = f"""Hi {debtor_name},
-
-This is a friendly reminder that you have an outstanding expense in RoomSync.
-
-Expense Details:
-- Description: {description}
-- Amount Owed: ${amount:.2f}
-- Owed To: {creditor_name}
-
-Please settle this expense at your earliest convenience.
-
-Log in to RoomSync to view details: {request.url_root}
-
-Thanks,
-The RoomSync Team
-"""
-        
-        msg.html = f"""
-<html>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-    <h2 style="color: #4A90E2;">Payment Reminder</h2>
-    <p>Hi {debtor_name},</p>
-    <p>This is a friendly reminder that you have an outstanding expense in RoomSync.</p>
-    
-    <div style="background-color: #f4f4f4; padding: 15px; border-radius: 5px; margin: 20px 0;">
-        <h3 style="margin-top: 0; color: #4A90E2;">Expense Details</h3>
-        <p><strong>Description:</strong> {description}</p>
-        <p><strong>Amount Owed:</strong> <span style="font-size: 1.2em; color: #E74C3C;">${amount:.2f}</span></p>
-        <p><strong>Owed To:</strong> {creditor_name}</p>
-    </div>
-    
-    <p>Please settle this expense at your earliest convenience.</p>
-    <p><a href="{request.url_root}expenses" style="background-color: #4A90E2; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">View in RoomSync</a></p>
-    
-    <p style="color: #666; font-size: 0.9em; margin-top: 30px;">Thanks,<br>The RoomSync Team</p>
-</body>
-</html>
-"""
-        
-        mail.send(msg)
-        return True
-    except Exception as e:
-        print(f"Error sending email: {e}", file=sys.stderr)
-        return False
-
-
-def check_and_send_weekly_reminders():
-    """Automated job - checks for expenses older than 7 days and sends reminders."""
-    print(f"Running weekly reminder check at {datetime.utcnow()}", file=sys.stderr)
-    
-    try:
-        seven_days_ago = datetime.utcnow() - timedelta(days=7)
-        
-        splits = db.session.query(ExpenseSplit).join(Expense).filter(
-            Expense.created_at <= seven_days_ago,
-            ExpenseSplit.user_id != Expense.paid_by_user_id
-        ).all()
-        
-        reminders_sent = 0
-        for split in splits:
-            expense = split.expense
-            
-            recent_reminder = ExpenseReminder.query.filter(
-                ExpenseReminder.split_id == split.id,
-                ExpenseReminder.reminder_type == 'automated',
-                ExpenseReminder.sent_at >= seven_days_ago
-            ).first()
-            
-            if recent_reminder:
-                continue
-            
-            debtor = split.user
-            creditor = expense.paid_by
-            
-            success = send_expense_reminder_email(
-                debtor_email=debtor.email,
-                debtor_name=debtor.email.split('@')[0],
-                creditor_name=creditor.email.split('@')[0],
-                amount=split.amount,
-                description=expense.description
-            )
-            
-            if success:
-                reminder = ExpenseReminder(
-                    expense_id=expense.id,
-                    split_id=split.id,
-                    reminder_type='automated'
-                )
-                db.session.add(reminder)
-                reminders_sent += 1
-        
-        db.session.commit()
-        print(f"Sent {reminders_sent} automated reminders", file=sys.stderr)
-        
-    except Exception as e:
-        print(f"Error in automated reminders: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        db.session.rollback()
-
-
-# Schedule the automated reminder job to run daily at 9 AM
-scheduler.add_job(
-    func=check_and_send_weekly_reminders,
-    trigger='cron',
-    hour=9,
-    minute=0,
-    id='weekly_expense_reminders'
-)
-
-
 # Auth helpers
 def login_required(f):
     @wraps(f)
@@ -419,6 +281,18 @@ def get_current_user():
 def require_group(user):
     return None if user.group_id else redirect(url_for('group'))
 
+def create_notification(user_id, group_id, notif_type, title, message, related_id=None):
+    """Call this from any route after an action to queue a notification."""
+    notif = Notification(
+        user_id=user_id,
+        group_id=group_id,
+        type=notif_type,
+        title=title,
+        message=message,
+        related_id=related_id
+    )
+    db.session.add(notif)
+    return notif
 
 # Auth routes
 @app.route('/login', methods=['GET', 'POST'])
@@ -1364,6 +1238,72 @@ def send_expense_reminder(expense_id, user_id):
     else:
         return jsonify({'error': 'Failed to send reminder'}), 500
 
+@app.route('/notifications')
+@login_required
+def notifications_page():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for('login'))
+    if redirect_response := require_group(user):
+        return redirect_response
+    return render_template('notifications.html', group=user.group)
+
+
+@app.route('/api/notifications', methods=['GET'])
+@login_required
+def get_notifications():
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    notifs = (
+        Notification.query
+        .filter_by(user_id=user.id)
+        .order_by(Notification.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    return jsonify([{
+        'id': n.id,
+        'type': n.type,
+        'title': n.title,
+        'message': n.message,
+        'is_read': n.is_read,
+        'related_id': n.related_id,
+        'created_at': n.created_at.isoformat()
+    } for n in notifs])
+
+
+@app.route('/api/notifications/unread-count', methods=['GET'])
+@login_required
+def get_unread_count():
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'count': 0})
+    count = Notification.query.filter_by(user_id=user.id, is_read=False).count()
+    return jsonify({'count': count})
+
+
+@app.route('/api/notifications/<int:notif_id>/read', methods=['POST'])
+@login_required
+def mark_notification_read(notif_id):
+    user = get_current_user()
+    notif = Notification.query.filter_by(id=notif_id, user_id=user.id).first()
+    if not notif:
+        return jsonify({'error': 'Not found'}), 404
+    notif.is_read = True
+    db.session.commit()
+    return jsonify({'success': True})
+
+
+@app.route('/api/notifications/read-all', methods=['POST'])
+@login_required
+def mark_all_read():
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Unauthorized'}), 401
+    Notification.query.filter_by(user_id=user.id, is_read=False).update({'is_read': True})
+    db.session.commit()
+    return jsonify({'success': True})
 
 # Init
 with app.app_context():
