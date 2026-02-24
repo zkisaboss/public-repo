@@ -15,7 +15,8 @@ class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
-    password = db.Column(db.String(255), nullable=False)
+    password = db.Column(db.String(255), nullable=True)  # Nullable for OAuth users
+    auth_provider = db.Column(db.String(20), default='email')  # 'email', 'google', 'apple'
     group_id = db.Column(db.Integer, db.ForeignKey('groups.id'))
     group = relationship('Group', backref='users')
 
@@ -120,6 +121,11 @@ import atexit
 
 # Load environment variables
 load_dotenv()
+
+# Google Sign-In
+from google.oauth2 import id_token as google_id_token
+from google.auth.transport import requests as google_requests
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
 
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 print("Stripe key loaded:", stripe.api_key)
@@ -432,13 +438,39 @@ def login():
         password = request.form.get('password', '')
         if not email or not password:
             flash('Email and password required')
-            return render_template('login.html')
+            return render_template('login.html', google_client_id=GOOGLE_CLIENT_ID)
         user = User.query.filter_by(email=email).first()
-        if user and check_password_hash(user.password, password):
+        if user and user.password and check_password_hash(user.password, password):
             session['user_id'] = user.id
             return redirect(url_for('home') if user.group_id else url_for('group'))
         flash('Invalid credentials')
-    return render_template('login.html')
+    return render_template('login.html', google_client_id=GOOGLE_CLIENT_ID)
+
+
+@app.route('/auth/google', methods=['POST'])
+def auth_google():
+    """Handle Google Sign-In callback."""
+    token = request.form.get('credential')
+    if not token:
+        flash('Google authentication failed')
+        return redirect(url_for('login'))
+    try:
+        idinfo = google_id_token.verify_oauth2_token(
+            token, google_requests.Request(), GOOGLE_CLIENT_ID
+        )
+        email = idinfo['email'].strip().lower()
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            user = User(email=email, password=None, auth_provider='google')
+            db.session.add(user)
+            db.session.commit()
+        session['user_id'] = user.id
+        return redirect(url_for('home') if user.group_id else url_for('group'))
+    except Exception as e:
+        print(f'Google auth error: {e}', file=sys.stderr)
+        flash('Google authentication failed')
+        return redirect(url_for('login'))
+
 
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -448,11 +480,11 @@ def register():
         password = request.form.get('password', '')
         if not email or not password:
             flash('Email and password required')
-            return render_template('register.html')
+            return render_template('register.html', google_client_id=GOOGLE_CLIENT_ID)
         if len(password) < 6:
             flash('Password must be at least 6 characters')
-            return render_template('register.html')
-        user = User(email=email, password=generate_password_hash(password))
+            return render_template('register.html', google_client_id=GOOGLE_CLIENT_ID)
+        user = User(email=email, password=generate_password_hash(password), auth_provider='email')
         try:
             db.session.add(user)
             db.session.commit()
@@ -461,7 +493,7 @@ def register():
         except IntegrityError:
             db.session.rollback()
             flash('Email already exists')
-    return render_template('register.html')
+    return render_template('register.html', google_client_id=GOOGLE_CLIENT_ID)
 
 
 @app.route('/logout')
