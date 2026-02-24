@@ -38,6 +38,19 @@ class Payment(db.Model):
     stripe_payment_intent_id = db.Column(db.String(255), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class Notification(db.Model):
+    __tablename__ = 'notifications'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
+    type = db.Column(db.String(50), nullable=False)  # 'expense', 'chore', 'grocery', 'payment'
+    title = db.Column(db.String(200), nullable=False)
+    message = db.Column(db.String(500), nullable=False)
+    is_read = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    related_id = db.Column(db.Integer, nullable=True)
+    user = relationship('User', backref='notifications')
+
 class GroceryItem(db.Model):
     __tablename__ = 'grocery_items'
     id = db.Column(db.Integer, primary_key=True)
@@ -160,7 +173,6 @@ def get_users():
         {'user_id': u.id, 'name': u.email.split('@')[0]} 
         for u in users
     ])
-
 
 @app.route('/api/chores', methods=['GET'])
 @login_required
@@ -329,6 +341,18 @@ def get_current_user():
 def require_group(user):
     return None if user.group_id else redirect(url_for('group'))
 
+def create_notification(user_id, group_id, notif_type, title, message, related_id=None):
+    """Call this from any route after an action to queue a notification."""
+    notif = Notification(
+        user_id=user_id,
+        group_id=group_id,
+        type=notif_type,
+        title=title,
+        message=message,
+        related_id=related_id
+    )
+    db.session.add(notif)
+    return notif
 
 # Auth routes
 @app.route('/login', methods=['GET', 'POST'])
@@ -1265,6 +1289,72 @@ def send_expense_reminder(expense_id, user_id):
     else:
         return jsonify({'error': 'Failed to send reminder'}), 500
 
+@app.route('/notifications')
+@login_required
+def notifications_page():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for('login'))
+    if redirect_response := require_group(user):
+        return redirect_response
+    return render_template('notifications.html', group=user.group)
+
+
+@app.route('/api/notifications', methods=['GET'])
+@login_required
+def get_notifications():
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    notifs = (
+        Notification.query
+        .filter_by(user_id=user.id)
+        .order_by(Notification.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    return jsonify([{
+        'id': n.id,
+        'type': n.type,
+        'title': n.title,
+        'message': n.message,
+        'is_read': n.is_read,
+        'related_id': n.related_id,
+        'created_at': n.created_at.isoformat()
+    } for n in notifs])
+
+
+@app.route('/api/notifications/unread-count', methods=['GET'])
+@login_required
+def get_unread_count():
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'count': 0})
+    count = Notification.query.filter_by(user_id=user.id, is_read=False).count()
+    return jsonify({'count': count})
+
+
+@app.route('/api/notifications/<int:notif_id>/read', methods=['POST'])
+@login_required
+def mark_notification_read(notif_id):
+    user = get_current_user()
+    notif = Notification.query.filter_by(id=notif_id, user_id=user.id).first()
+    if not notif:
+        return jsonify({'error': 'Not found'}), 404
+    notif.is_read = True
+    db.session.commit()
+    return jsonify({'success': True})
+
+
+@app.route('/api/notifications/read-all', methods=['POST'])
+@login_required
+def mark_all_read():
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Unauthorized'}), 401
+    Notification.query.filter_by(user_id=user.id, is_read=False).update({'is_read': True})
+    db.session.commit()
+    return jsonify({'success': True})
 
 # Init
 with app.app_context():
