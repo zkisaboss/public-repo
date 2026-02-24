@@ -103,12 +103,12 @@
   </div>
 </div>
 
+
 <script>
   /* ------------------ JavaScript ------------------ */
 
   const API_BASE = "/api/expenses";
   const USERS_API = "/api/users";
-
   const listContainer = document.getElementById("expense-list-container");
   const descriptionInput = document.getElementById("expense-description");
   const amountInput = document.getElementById("expense-amount");
@@ -492,25 +492,39 @@
     document.getElementById("details-modal").classList.remove("active");
   }
 
+
+
   async function payExpense(expenseId) {
-  const res = await fetch(`${API_BASE}/${expenseId}/pay`, { method: "POST" });
-  const data = await res.json();
+    try {
+    const res = await fetch(API_BASE, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ description, amount, date, paidByUserId, splits }),
+});
 
-  if (!res.ok) {
-    alert(data.error || "Payment failed");
-    return;
-  }
-
-  // Redirect to Stripe Checkout
-  window.location.href = data.checkout_url;
+const data = await res.json().catch(() => ({}));
+if (!res.ok) {
+  console.log("Create expense failed:", data);
+  alert(data.error || "Failed to create expense");
+  return;
 }
 
+    window.location.href = data.checkout_url;
+  } catch (e) {
+    alert("Network error starting payment");
+    console.error(e);
+  }
+}
+// Wire up buttons + initial load
+addBtn.addEventListener("click", createExpense);
+filterUserSelect.addEventListener("change", renderExpenses);
 
-  addBtn.addEventListener("click", createExpense);
-  filterUserSelect.addEventListener("change", renderExpenses);
+// Initial page load
+(async function init() {
+  await loadUsers();
+  await fetchExpenses();
+})();
 
-  // Initialize
-  loadUsers().then(fetchExpenses);
-  setInterval(fetchExpenses, 3000);
+
 </script>
 {% endblock %}
