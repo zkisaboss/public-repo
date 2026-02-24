@@ -16,7 +16,7 @@
     </select>
 
     <input id="search" type="text" placeholder="Search transaction ID / user / expense"
-           style="padding:0.5rem; border:1px solid #ddd; border-radius:6px; flex:1; min-width:220px;">
+      style="padding:0.5rem; border:1px solid #ddd; border-radius:6px; flex:1; min-width:220px;">
   </div>
 
   <div style="overflow-x:auto;">
@@ -53,7 +53,7 @@
     return d.toLocaleString();
   }
 
-  function fmtMoney(n, currency="usd") {
+  function fmtMoney(n, currency = "usd") {
     return new Intl.NumberFormat(undefined, {
       style: "currency",
       currency: (currency || "usd").toUpperCase()
@@ -125,5 +125,3 @@
   setInterval(loadPayments, 3000);
 </script>
 {% endblock %}
-
-
