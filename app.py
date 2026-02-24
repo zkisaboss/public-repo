@@ -887,7 +887,7 @@ def stripe_webhook():
         s = event["data"]["object"]
         p = Payment.query.filter_by(stripe_session_id=s["id"]).first()
         if p:
-            p.status = "confirmed"
+            p.status = "completed"
             p.stripe_payment_intent_id = s.get("payment_intent")
             db.session.commit()
 
@@ -1169,4 +1169,4 @@ with app.app_context():
     db.create_all()
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5050)

@@ -492,29 +492,30 @@
     document.getElementById("details-modal").classList.remove("active");
   }
 
-
-
   async function payExpense(expenseId) {
-    try {
-    const res = await fetch(API_BASE, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ description, amount, date, paidByUserId, splits }),
-});
+  try {
 
-const data = await res.json().catch(() => ({}));
-if (!res.ok) {
-  console.log("Create expense failed:", data);
-  alert(data.error || "Failed to create expense");
-  return;
-}
+    const res = await fetch(API_BASE, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description, amount, date, paidByUserId, splits }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.log("Create expense failed:", data);
+      alert(data.error || "Failed to create expense");
+      return;
+    }
 
     window.location.href = data.checkout_url;
+
   } catch (e) {
     alert("Network error starting payment");
     console.error(e);
   }
 }
+
 // Wire up buttons + initial load
 addBtn.addEventListener("click", createExpense);
 filterUserSelect.addEventListener("change", renderExpenses);
@@ -524,7 +525,7 @@ filterUserSelect.addEventListener("change", renderExpenses);
   await loadUsers();
   await fetchExpenses();
 })();
-
-
+  
+  
 </script>
 {% endblock %}
