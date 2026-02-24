@@ -197,6 +197,11 @@ def get_current_user():
     return user
 
 
+@app.context_processor
+def inject_user():
+    return dict(current_user=get_current_user())
+
+
 def require_group(user):
     return None if user.group_id else redirect(url_for('group'))
 
