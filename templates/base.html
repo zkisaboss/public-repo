@@ -1334,15 +1334,6 @@
             {% endif %}
             <a href="{{ url_for('logout') }}">Logout</a>
         </div>
-        {% else %}
-        <div>
-            {% if request.endpoint != 'login' %}
-            <a href="{{ url_for('login') }}">Login</a>
-            {% endif %}
-            {% if request.endpoint != 'register' %}
-            <a href="{{ url_for('register') }}">Register</a>
-            {% endif %}
-        </div>
         {% endif %}
     </nav>
 
