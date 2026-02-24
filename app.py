@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import relationship
-from datetime import datetime, date
+from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 from sqlalchemy.exc import IntegrityError
@@ -71,23 +71,64 @@ class ExpenseSplit(db.Model):
     amount = db.Column(db.Float, nullable=False)
 
 # Chore models
-chore_assignments = db.Table('chore_assignments',
-    db.Column('chore_id', db.Integer, db.ForeignKey('chores.id'), primary_key=True),
-    db.Column('user_id', db.Integer, db.ForeignKey('users.id'), primary_key=True)
+# ------------------------
+# Chores: association table
+# ------------------------
+chore_assignments = db.Table(
+    "chore_assignments",
+    db.Column("chore_id", db.Integer, db.ForeignKey("chores.id"), primary_key=True),
+    db.Column("user_id", db.Integer, db.ForeignKey("users.id"), primary_key=True),
 )
 
 class Chore(db.Model):
+    __tablename__ = "chores"
+
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(200), nullable=False)
     next_due_date = db.Column(db.Date, nullable=True)
     completed = db.Column(db.Boolean, default=False)
-    group_id = db.Column(db.Integer, db.ForeignKey('group.id'), nullable=False)
-    created_by_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+
+    
+    group_id = db.Column(db.Integer, db.ForeignKey("groups.id"), nullable=False)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
 
     # Relationships
-    assignments = db.relationship('User', secondary=chore_assignments, lazy='subquery',
-        backref=db.backref('assigned_chores', lazy=True))
-    completions = db.relationship('ChoreCompletion', backref='chore', lazy=True, cascade="all, delete-orphan")
+    assignments = db.relationship(
+        "User",
+        secondary=chore_assignments,
+        lazy="subquery",
+        backref=db.backref("assigned_chores", lazy=True),
+    )
+
+    completions = db.relationship(
+        "ChoreCompletion",
+        backref="chore",
+        lazy=True,
+        cascade="all, delete-orphan",
+    )
+
+class ChoreCompletion(db.Model):
+    __tablename__ = "chore_completions"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    chore_id = db.Column(db.Integer, db.ForeignKey("chores.id"), nullable=False)
+    completed_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship("User", backref="chore_completions")
+
+
+class ExpenseReminder(db.Model):
+    __tablename__ = "expense_reminders"
+
+    id = db.Column(db.Integer, primary_key=True)
+    expense_id = db.Column(db.Integer, db.ForeignKey("expenses.id"), nullable=False)
+    split_id = db.Column(db.Integer, db.ForeignKey("expense_splits.id"), nullable=False)
+    sent_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    reminder_type = db.Column(db.String(20), nullable=False)
+
+    expense = db.relationship("Expense", backref="reminders")
+    split = db.relationship("ExpenseSplit", backref="reminders")
 
 
 # Auth helpers
@@ -188,84 +229,6 @@ def get_chores():
         })
     return jsonify(result)
 
-class ChoreCompletion(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    chore_id = db.Column(db.Integer, db.ForeignKey('chore.id'), nullable=False)
-    completed_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    user = db.relationship('User', backref='chore_completions')
-
-
-# Auth helpers
-# Association table for ChoreAssignments
-chore_assignments = db.Table('chore_assignments',
-    db.Column('user_id', db.Integer, db.ForeignKey('user.id'), primary_key=True),
-    db.Column('chore_id', db.Integer, db.ForeignKey('chore.id'), primary_key=True)
-)
-
-
-class Chore(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(200), nullable=False)
-    next_due_date = db.Column(db.Date, nullable=True)
-    completed = db.Column(db.Boolean, default=False)
-    group_id = db.Column(db.Integer, db.ForeignKey('group.id'), nullable=False)
-    created_by_id = db.Column(db.Integer, db.ForeignKey('user.id'))
-
-    # Relationships
-    assignments = db.relationship('User', secondary=chore_assignments, lazy='subquery',
-        backref=db.backref('assigned_chores', lazy=True))
-    completions = db.relationship('ChoreCompletion', backref='chore', lazy=True, cascade="all, delete-orphan")
-
-
-class ChoreCompletion(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    chore_id = db.Column(db.Integer, db.ForeignKey('chore.id'), nullable=False)
-    completed_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    user = db.relationship('User', backref='chore_completions')
-
-
-# Add these models after ChoreCompletion class
-
-class Expense(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    description = db.Column(db.String(200), nullable=False)
-    amount = db.Column(db.Float, nullable=False)
-    date = db.Column(db.Date, nullable=False)
-    paid_by_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    group_id = db.Column(db.Integer, db.ForeignKey('group.id'), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
-    # Relationships
-    paid_by = db.relationship('User', backref='expenses_paid')
-    splits = db.relationship('ExpenseSplit', backref='expense', lazy=True, cascade="all, delete-orphan")
-
-
-class ExpenseSplit(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    expense_id = db.Column(db.Integer, db.ForeignKey('expense.id'), nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    percentage = db.Column(db.Float, nullable=False)
-    amount = db.Column(db.Float, nullable=False)
-    
-    # Relationship
-    user = db.relationship('User', backref='expense_splits')
-
-
-class ExpenseReminder(db.Model):
-    """Track when reminders are sent for expenses."""
-    id = db.Column(db.Integer, primary_key=True)
-    expense_id = db.Column(db.Integer, db.ForeignKey('expense.id'), nullable=False)
-    split_id = db.Column(db.Integer, db.ForeignKey('expense_split.id'), nullable=False)
-    sent_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    reminder_type = db.Column(db.String(20), nullable=False)  # 'manual' or 'automated'
-    
-    # Relationships
-    expense = db.relationship('Expense', backref='reminders')
-    split = db.relationship('ExpenseSplit', backref='reminders')
 
 
 # ===== Email Reminder Functions =====
@@ -1369,6 +1332,5 @@ def send_expense_reminder(expense_id, user_id):
 with app.app_context():
     db.create_all()
 
-if __name__ == '__main__':
-    app.run(debug=True, port=5001)
+if __name__ == "__main__":
     app.run(debug=True, port=5000)
