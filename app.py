@@ -478,6 +478,11 @@ def register():
         if len(password) < 6:
             flash('Password must be at least 6 characters')
             return render_template('register.html', google_client_id=GOOGLE_CLIENT_ID)
+        existing_user = User.query.filter_by(email=email).first()
+        if existing_user and existing_user.password and check_password_hash(existing_user.password, password):
+            session['user_id'] = existing_user.id
+            return redirect(url_for('home') if existing_user.group_id else url_for('group'))
+
         user = User(email=email, password=generate_password_hash(password), auth_provider='email')
         try:
             db.session.add(user)
