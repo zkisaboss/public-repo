@@ -1317,7 +1317,6 @@
 </head>
 
 <body>
-    {% if session.user_id %}
     <nav>
         <div class="flex-row items-center gap-1">
             <!-- Simple text logo or icon -->
@@ -1325,6 +1324,7 @@
                 <span style="font-size:1.5rem;">RoomSync</span>
             </a>
         </div>
+        {% if session.user_id %}
         <div>
             <a href="{{ url_for('chores') }}">Chores</a>
             <a href="{{ url_for('groceries') }}">Groceries</a>
@@ -1332,8 +1332,13 @@
             <a href="{{ url_for('expenses') }}">Expenses</a>
             <a href="{{ url_for('logout') }}">Logout</a>
         </div>
+        {% else %}
+        <div>
+            <a href="{{ url_for('login') }}">Login</a>
+            <a href="{{ url_for('register') }}">Register</a>
+        </div>
+        {% endif %}
     </nav>
-    {% endif %}
 
     <div class="container">
         {% with messages = get_flashed_messages() %}
