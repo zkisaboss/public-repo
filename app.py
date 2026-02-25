@@ -353,7 +353,8 @@ def parse_receipt_with_claude(image_bytes):
     Each item:
     - "name": item name only (exclude codes/quantities)
     - "amt": quantity (parse from EA/QTY/@, default 1)
-    - "price": line total (not unit price)
+    - "unit_price": price per single unit
+    - "price": line total (qty × unit_price)
 
     Ignore tax/subtotals. JSON only.
     """
@@ -386,6 +387,7 @@ def parse_receipt_with_claude(image_bytes):
                 {
                     'name': item.get('name', ''),
                     'quantity': item.get('amt', 1),
+                    'unit_price': item.get('unit_price'),
                     'price': item.get('price')
                 }
                 for item in data.get('items', [])

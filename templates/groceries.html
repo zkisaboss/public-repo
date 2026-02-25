@@ -78,8 +78,8 @@
                 </fieldset>
                 <div class="input-group">
                     <span>$</span>
-                    <input type="number" name="price" value="{{ item.price or '' }}" step="0.01" min="0"
-                        placeholder="0.00">
+                    <input type="number" name="price" value="{{ item.price if item.price is not none else '0.00' }}"
+                        step="0.01" min="0" placeholder="0.00">
                 </div>
                 <button type="button" data-action="delete" class="btn-icon">×</button>
             </div>
@@ -229,24 +229,28 @@
         };
 
         const renderScanned = () => {
-            el.scannedItems.innerHTML = scannedData.map((item, i) => `
+            el.scannedItems.innerHTML = scannedData.map((item, i) => {
+                const unitPrice = item.unit_price != null ? item.unit_price : (item.price != null && item.quantity ? (item.price / item.quantity) : null);
+                return `
       <li data-index="${i}" class="list-item">
         <div class="flex-1">
             <input type="text" name="name" value="${escapeHtml(item.name)}" class="input-transparent w-100" placeholder="Item name">
         </div>
         <div class="flex-row items-center gap-05">
-            <div class="input-group" style="width: 100px;">
-                <span style="font-size: 0.75rem;">Qty</span>
-                <input type="number" name="quantity" value="${item.quantity}" min="1" class="input-transparent" style="text-align: right; width: 100%;">
-            </div>
+            <fieldset class="quantity-control">
+                <button type="button" data-action="decrement">−</button>
+                <output>${item.quantity || 1}</output>
+                <button type="button" data-action="increment">+</button>
+            </fieldset>
             <div class="input-group">
                 <span>$</span>
-                <input type="number" name="price" value="${item.price || ""}" step="0.01" class="input-transparent" placeholder="0.00">
+                <input type="number" name="unit_price" value="${unitPrice != null ? unitPrice.toFixed(2) : "0.00"}" step="0.01" min="0" class="input-transparent" placeholder="0.00">
             </div>
             <button type="button" data-action="remove" class="btn-icon">×</button>
         </div>
       </li>
-    `).join("");
+    `;
+            }).join("");
             el.scannedPreview.classList.remove("hidden");
         };
 
@@ -257,11 +261,16 @@
         };
 
         const addAllScanned = async () => {
-            const items = $$("#scannedItems li").map(li => ({
-                name: $("[name=name]", li).value.trim(),
-                quantity: parseInt($("[name=quantity]", li).value) || 1,
-                price: parseFloat($("[name=price]", li).value) || null
-            })).filter(i => i.name);
+            const items = $$("#scannedItems li").map(li => {
+                const qty = parseInt($("output", li)?.textContent) || 1;
+                const unitPrice = parseFloat($("[name=unit_price]", li).value) || null;
+                const price = unitPrice != null ? +(unitPrice * qty).toFixed(2) : null;
+                return {
+                    name: $("[name=name]", li).value.trim(),
+                    quantity: qty,
+                    price
+                };
+            }).filter(i => i.name);
             if (!items.length) return;
             try {
                 await api("/groceries/bulk-add", "POST", { items });
@@ -289,7 +298,7 @@
           </fieldset>
           <div class="input-group">
             <span>$</span>
-            <input type="number" name="price" value="${price || ""}" step="0.01" min="0" placeholder="0.00">
+            <input type="number" name="price" value="${price || "0.00"}" step="0.01" min="0" placeholder="0.00">
           </div>
           <button type="button" data-action="delete" class="btn-icon">×</button>
       </div>
@@ -376,12 +385,23 @@
 
         // Event: Scanned items
         el.scannedItems.addEventListener("click", (e) => {
-            if (e.target.dataset.action === "remove") {
-                const i = parseInt(e.target.closest("li").dataset.index);
+            const li = e.target.closest("li");
+            if (!li) return;
+            const action = e.target.dataset.action;
+
+            if (action === "remove") {
+                const i = parseInt(li.dataset.index);
                 scannedData.splice(i, 1);
                 scannedData.length ? renderScanned() : clearScanned();
+            } else if (action === "increment" || action === "decrement") {
+                const output = $("output", li);
+                let qty = parseInt(output?.textContent) || 1;
+                if (action === "increment") output.textContent = ++qty;
+                else if (qty > 1) output.textContent = --qty;
             }
         });
+
+
 
         // Event: Add item form
         el.addItemSection.addEventListener("click", (e) => {
@@ -446,6 +466,14 @@
 
         // Event: Pay button
         el.payBtn.addEventListener("click", paySelected);
+
+        // Event: Format money inputs to 2 decimal places on blur
+        document.addEventListener("blur", (e) => {
+            if (e.target.matches(".input-group input[type='number']")) {
+                const val = parseFloat(e.target.value);
+                if (!isNaN(val)) e.target.value = val.toFixed(2);
+            }
+        }, true);
 
         // Initialize
         updateTotals();
