@@ -7,29 +7,29 @@
     <p class="text-center" style="color: #666; margin-bottom: 2rem;">
         Create a new group or join an existing one
     </p>
-    
+
     <div class="card" style="margin-bottom: 1.5rem;">
         <h2>Create New Group</h2>
         <form method="POST">
             <input type="hidden" name="action" value="create">
             <div class="form-group">
                 <label for="name">Group Name</label>
-                <input type="text" id="name" name="name" placeholder="e.g., Apartment 4B" required>
+                <input type="text" id="name" name="name" placeholder="e.g., Apartment 4B" required autofocus>
             </div>
             <button type="submit">Create Group</button>
         </form>
     </div>
-    
+
     <div class="text-center" style="color: #888; margin: 1.5rem 0;">— OR —</div>
-    
+
     <div class="card">
         <h2>Join Existing Group</h2>
         <form method="POST">
             <input type="hidden" name="action" value="join">
             <div class="form-group">
                 <label for="code">Group Code</label>
-                <input type="text" id="code" name="code" placeholder="e.g., A1B2C3D4" 
-                       maxlength="8" style="text-transform: uppercase;" required>
+                <input type="text" id="code" name="code" placeholder="e.g., A1B2C3D4" maxlength="8"
+                    style="text-transform: uppercase;" required>
             </div>
             <button type="submit" class="btn-secondary">Join Group</button>
         </form>

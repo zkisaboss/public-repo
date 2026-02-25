@@ -33,7 +33,7 @@ class TestAuth:
         })
         resp = client.post('/register', data={
             'email': 'dupe@test.com',
-            'password': 'password123'
+            'password': 'differentpassword'
         })
         assert resp.status_code == 200  # Stays on register page with flash
 

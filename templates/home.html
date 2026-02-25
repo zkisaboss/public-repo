@@ -2,36 +2,47 @@
 {% block title %}Home{% endblock %}
 
 {% block content %}
-<h1>{{ group.name }}</h1>
-<p style="color: #666; margin-bottom: 2rem;">Group Code: <strong>{{ group.code }}</strong></p>
+<header class="page-header">
+    <h1>{{ group.name }}</h1>
+    <p class="subtitle">Group Code: <strong>{{ group.code }}</strong></p>
+</header>
 
-<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem;">
-    <a href="{{ url_for('chores') }}" class="card" style="text-decoration: none; color: inherit;">
-        <h2>🧹 Chores</h2>
-        <p style="color: #666;">Manage household tasks and assignments</p>
-    </a>
-    
-    <a href="{{ url_for('groceries') }}" class="card" style="text-decoration: none; color: inherit;">
-        <h2>🛒 Groceries</h2>
-        <p style="color: #666;">Shared shopping list for the household</p>
-    </a>
+<div class="flex-col gap-2">
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
+        <a href="{{ url_for('chores') }}" class="card"
+            style="text-decoration: none; color: inherit; transition: transform 0.2s;"
+            onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform='translateY(0)'">
+            <h2 style="display: flex; align-items: center; gap: 0.75rem;">🧹 Chores</h2>
+            <p class="text-light">Manage household tasks and assignments</p>
+        </a>
 
-    <a href="{{ url_for('expenses') }}" class="card" style="text-decoration: none; color: inherit;">
-        <h2>💸 Expenses</h2>
-        <p style="color: #666;">Track and split shared costs</p>
-    </a>
-</div>
+        <a href="{{ url_for('groceries') }}" class="card"
+            style="text-decoration: none; color: inherit; transition: transform 0.2s;"
+            onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform='translateY(0)'">
+            <h2 style="display: flex; align-items: center; gap: 0.75rem;">🛒 Groceries</h2>
+            <p class="text-light">Shared shopping list for the household</p>
+        </a>
 
+        <a href="{{ url_for('expenses') }}" class="card"
+            style="text-decoration: none; color: inherit; transition: transform 0.2s;"
+            onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform='translateY(0)'">
+            <h2 style="display: flex; align-items: center; gap: 0.75rem;">💸 Expenses</h2>
+            <p class="text-light">Track and split shared costs</p>
+        </a>
+    </div>
 
-<div class="card mt-2">
-    <h2>👥 Members</h2>
-    <ul style="list-style: none; padding: 0;">
-        {% for user in group.users %}
-        <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
-            {{ user.email }}
-        </li>
-        {% endfor %}
-    </ul>
+    <section class="card">
+        <h2>👥 Members</h2>
+        <ul class="list-group">
+            {% for user in group.users %}
+            <li class="list-item">
+                <div class="flex-1">{{ user.email }}</div>
+                {% if user.id == current_user.id %}
+                <span class="badge">You</span>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </section>
 </div>
 {% endblock %}
-
