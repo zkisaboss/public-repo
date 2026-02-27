@@ -395,6 +395,17 @@
   const currentUserHasPaid = paidUserIds.has(CURRENT_USER_ID);
   const currentUserOwes = currentUserSplit && (expense.paidBy.user_id != CURRENT_USER_ID);
 
+
+  console.log("PAY DEBUG", {
+  CURRENT_USER_ID,
+  paidBy: expense.paidBy.user_id,
+  splitUserIds: expense.splits.map(s => s.user_id),
+  paidUserIds: Array.from(paidUserIds),
+  currentUserSplit,
+  currentUserHasPaid,
+  currentUserOwes
+});
+
   if (currentUserOwes && !currentUserHasPaid) {
     const payBtn = document.createElement("button");
     payBtn.textContent = "Pay via Stripe";
