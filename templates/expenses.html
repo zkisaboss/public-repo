@@ -522,7 +522,12 @@
     }
 
     // Redirect to Stripe Checkout
-    window.location.href = data.checkout_url;
+  const url = data.checkout_url || data.checkoutUrl;
+  if (!url) {
+    alert("No checkout url returned from backend. Check console log.");
+    return;
+  }
+  window.location.href = url;
   }
 
   addBtn.addEventListener("click", createExpense);
