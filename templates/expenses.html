@@ -62,12 +62,12 @@
 
 <a href="{{ url_for('home') }}" class="back-link">← Back</a>
 
-
 <script>
   /* ------------------ JavaScript ------------------ */
 
   const API_BASE = "/api/expenses";
   const USERS_API = "/api/users";
+
   const listContainer = document.getElementById("expense-list-container");
   const descriptionInput = document.getElementById("expense-description");
   const amountInput = document.getElementById("expense-amount");
@@ -501,37 +501,24 @@
 
 
 
-
   async function payExpense(expenseId) {
-    try {
-      const res = await fetch(`${API_BASE}/${expenseId}/pay`, { method: "POST" });
-      const data = await res.json().catch(() => ({}));
+    const res = await fetch(`${API_BASE}/${expenseId}/pay`, { method: "POST" });
+    const data = await res.json();
 
-      if (!res.ok) {
-        alert(data.error || "Payment failed");
-        return;
-      }
-
-      // Redirect to Stripe Checkout
-      window.location.href = data.checkout_url;
-    } catch (e) {
-      alert("Network error starting payment");
-      console.error(e);
+    if (!res.ok) {
+      alert(data.error || "Payment failed");
+      return;
     }
+
+    // Redirect to Stripe Checkout
+    window.location.href = data.checkout_url;
   }
 
-  // Wire up buttons + initial load
   addBtn.addEventListener("click", createExpense);
   filterUserSelect.addEventListener("change", renderExpenses);
 
-  // Initial page load
-  (async function init() {
-    await loadUsers();
-    await fetchExpenses();
-  })();
-
-  // Optional: auto-refresh every 5s
+  // Initialize
+  loadUsers().then(fetchExpenses);
   setInterval(fetchExpenses, 5000);
-
 </script>
 {% endblock %}
