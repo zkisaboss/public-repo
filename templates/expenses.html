@@ -67,6 +67,7 @@
 
   const API_BASE = "/api/expenses";
   const USERS_API = "/api/users";
+  const CURRENT_USER_ID = Number("{{ session.user_id }}");
 
   const listContainer = document.getElementById("expense-list-container");
   const descriptionInput = document.getElementById("expense-description");
@@ -209,6 +210,32 @@
     const filterUserId = filterUserSelect.value;
     let filtered = expenses;
 
+
+    // Check if any expense could show a Pay button
+let someoneCanPay = false;
+
+filtered.forEach(expense => {
+  const paidUserIds = new Set();
+  if (expense.payments) {
+    expense.payments.forEach(p => {
+      const s = (p.status || '').toLowerCase();
+      if (['completed','confirmed','paid','succeeded','success'].includes(s)) {
+        paidUserIds.add(p.user_id);
+      }
+    });
+  }
+
+  paidUserIds.add(expense.paidBy.user_id);
+
+  const currentUserSplit = expense.splits.find(s => s.user_id == CURRENT_USER_ID);
+  const currentUserHasPaid = paidUserIds.has(CURRENT_USER_ID);
+  const currentUserOwes = currentUserSplit && expense.paidBy.user_id != CURRENT_USER_ID;
+
+  if (currentUserOwes && !currentUserHasPaid) {
+    someoneCanPay = true;
+  }
+});
+
     if (filterUserId) {
       filtered = expenses.filter(e =>
         e.paidBy.user_id == filterUserId ||
@@ -217,14 +244,30 @@
     }
 
     listContainer.innerHTML = "";
+
     if (!filtered.length) {
       listContainer.innerHTML = `
         <div class="empty-state">
-            <p>No expenses found. Track shared costs by adding one above!</p>
+          <p>No expenses found. Add one above!</p>
+          <p style="font-size:0.9rem; opacity:0.7;">
+            Payments appear when multiple users split an expense.
+          </p>
         </div>
       `;
       return;
     }
+
+    if (!someoneCanPay) {
+  const hint = document.createElement("div");
+  hint.className = "empty-state";
+  hint.innerHTML = `
+    <p>No payments needed yet.</p>
+    <p style="font-size:0.9rem; opacity:0.7;">
+      Payments appear when another roommate pays for something you share.
+    </p>
+  `;
+  listContainer.appendChild(hint);
+}
 
     filtered.forEach((expense) => {
       const div = document.createElement("div");
@@ -386,15 +429,34 @@
 
     actions.appendChild(mainActions);
 
-    if (!allPaid) {
-      const payBtn = document.createElement("button");
-      payBtn.textContent = "Pay via Stripe";
-      payBtn.className = "btn-primary w-100";
-      payBtn.style.fontSize = "0.85rem";
-      payBtn.style.height = "32px";
-      payBtn.onclick = () => payExpense(expense.expenseId);
-      actions.appendChild(payBtn);
-    }
+    // Debug
+  console.log("expense", expense.expenseId, "allPaid=", allPaid, expense);
+
+  // Show Pay button ONLY if the current user owes and hasn't paid yet
+  const currentUserSplit = expense.splits.find(s => s.user_id == CURRENT_USER_ID);
+  const currentUserHasPaid = paidUserIds.has(CURRENT_USER_ID);
+  const currentUserOwes = currentUserSplit && (expense.paidBy.user_id != CURRENT_USER_ID);
+
+
+  console.log("PAY DEBUG", {
+  CURRENT_USER_ID,
+  paidBy: expense.paidBy.user_id,
+  splitUserIds: expense.splits.map(s => s.user_id),
+  paidUserIds: Array.from(paidUserIds),
+  currentUserSplit,
+  currentUserHasPaid,
+  currentUserOwes
+});
+
+  if (currentUserOwes && !currentUserHasPaid) {
+    const payBtn = document.createElement("button");
+    payBtn.textContent = "Pay via Stripe";
+    payBtn.className = "btn-primary w-100";
+    payBtn.style.fontSize = "0.85rem";
+    payBtn.style.height = "32px";
+    payBtn.onclick = () => payExpense(expense.expenseId);
+    actions.appendChild(payBtn);
+  }
 
     div.appendChild(info);
     div.appendChild(actions);
@@ -505,13 +567,20 @@
     const res = await fetch(`${API_BASE}/${expenseId}/pay`, { method: "POST" });
     const data = await res.json();
 
+    console.log("stripe response:", data);
+
     if (!res.ok) {
       alert(data.error || "Payment failed");
       return;
     }
 
     // Redirect to Stripe Checkout
-    window.location.href = data.checkout_url;
+  const url = data.checkout_url || data.checkoutUrl;
+  if (!url) {
+    alert("No checkout url returned from backend. Check console log.");
+    return;
+  }
+  window.location.href = url;
   }
 
   addBtn.addEventListener("click", createExpense);
