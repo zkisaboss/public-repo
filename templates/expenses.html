@@ -210,6 +210,32 @@
     const filterUserId = filterUserSelect.value;
     let filtered = expenses;
 
+
+    // Check if any expense could show a Pay button
+let someoneCanPay = false;
+
+filtered.forEach(expense => {
+  const paidUserIds = new Set();
+  if (expense.payments) {
+    expense.payments.forEach(p => {
+      const s = (p.status || '').toLowerCase();
+      if (['completed','confirmed','paid','succeeded','success'].includes(s)) {
+        paidUserIds.add(p.user_id);
+      }
+    });
+  }
+
+  paidUserIds.add(expense.paidBy.user_id);
+
+  const currentUserSplit = expense.splits.find(s => s.user_id == CURRENT_USER_ID);
+  const currentUserHasPaid = paidUserIds.has(CURRENT_USER_ID);
+  const currentUserOwes = currentUserSplit && expense.paidBy.user_id != CURRENT_USER_ID;
+
+  if (currentUserOwes && !currentUserHasPaid) {
+    someoneCanPay = true;
+  }
+});
+
     if (filterUserId) {
       filtered = expenses.filter(e =>
         e.paidBy.user_id == filterUserId ||
@@ -218,14 +244,30 @@
     }
 
     listContainer.innerHTML = "";
+
     if (!filtered.length) {
       listContainer.innerHTML = `
         <div class="empty-state">
-            <p>No expenses found. Track shared costs by adding one above!</p>
+          <p>No expenses found. Add one above!</p>
+          <p style="font-size:0.9rem; opacity:0.7;">
+            Payments appear when multiple users split an expense.
+          </p>
         </div>
       `;
       return;
     }
+
+    if (!someoneCanPay) {
+  const hint = document.createElement("div");
+  hint.className = "empty-state";
+  hint.innerHTML = `
+    <p>No payments needed yet.</p>
+    <p style="font-size:0.9rem; opacity:0.7;">
+      Payments appear when another roommate pays for something you share.
+    </p>
+  `;
+  listContainer.appendChild(hint);
+}
 
     filtered.forEach((expense) => {
       const div = document.createElement("div");
