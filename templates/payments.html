@@ -4,13 +4,16 @@
 {% block content %}
 <header class="page-header">
   <h1>Payments</h1>
-  <p class="subtitle">Payment & transaction history</p>
+  <p class="subtitle">Complete transaction and payment history</p>
 </header>
 
 <section class="card">
-  <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap; margin-bottom:1rem;">
-    <select id="status-filter" style="padding:0.5rem; border:1px solid #ddd; border-radius:6px;">
-      <option value="">All statuses</option>
+  <div class="flex-row items-center mb-1" style="gap: 0.75rem;">
+    <input id="search" type="text" placeholder="Search transaction ID, user, or expense..." class="form-input flex-1"
+      style="height: 40px;">
+
+    <select id="status-filter" class="form-input" style="width: auto; min-width: 140px; height: 40px;">
+      <option value="">All Statuses</option>
       <option value="completed">Completed</option>
       <option value="pending">Pending</option>
     </select>
@@ -19,38 +22,61 @@
       style="padding:0.5rem; border:1px solid #ddd; border-radius:6px; flex:1; min-width:220px;">
   </div>
 
-  <div style="overflow-x:auto;">
-    <table style="width:100%; border-collapse:collapse;">
+  <div id="payments-table-container" style="overflow-x: auto;">
+    <table class="list-group" style="width: 100%; border-collapse: collapse;">
       <thead>
-        <tr style="text-align:left; border-bottom:1px solid #eee;">
-          <th style="padding:0.75rem;">Date</th>
-          <th style="padding:0.75rem;">Status</th>
-          <th style="padding:0.75rem;">Amount</th>
-          <th style="padding:0.75rem;">Payer</th>
-          <th style="padding:0.75rem;">Expense ID</th>
-          <th style="padding:0.75rem;">Transaction ID</th>
+        <tr style="text-align: left; border-bottom: 2px solid var(--border);">
+          <th
+            style="padding: 1rem 0.75rem; color: var(--text-light); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em;">
+            Date</th>
+          <th
+            style="padding: 1rem 0.75rem; color: var(--text-light); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em;">
+            Status</th>
+          <th
+            style="padding: 1rem 0.75rem; color: var(--text-light); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em;">
+            Amount</th>
+          <th
+            style="padding: 1rem 0.75rem; color: var(--text-light); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em;">
+            Payer</th>
+          <th
+            style="padding: 1rem 0.75rem; color: var(--text-light); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em;">
+            Expense</th>
+          <th
+            style="padding: 1rem 0.75rem; color: var(--text-light); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em;">
+            Transaction ID</th>
         </tr>
       </thead>
       <tbody id="payments-body"></tbody>
     </table>
   </div>
 
-  <p id="empty" style="display:none; color:#888; padding:1rem 0;">No payments yet.</p>
+  <div id="empty-payments" class="empty-state" style="display: none;">
+    <p>No transactions found matching your criteria.</p>
+  </div>
 </section>
+
+<a href="{{ url_for('home') }}" class="back-link">← Back</a>
 
 <script>
   const PAYMENTS_API = "/api/payments";
   let payments = [];
 
   const bodyEl = document.getElementById("payments-body");
-  const emptyEl = document.getElementById("empty");
+  const tableContainer = document.getElementById("payments-table-container");
+  const emptyEl = document.getElementById("empty-payments");
   const statusFilter = document.getElementById("status-filter");
   const searchInput = document.getElementById("search");
 
   function fmtDate(iso) {
     if (!iso) return "-";
     const d = new Date(iso);
-    return d.toLocaleString();
+    return d.toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   }
 
   function fmtMoney(n, currency = "usd") {
@@ -63,9 +89,12 @@
   function badge(status) {
     const s = (status || "").toLowerCase();
     const isDone = s === "completed";
-    const bg = isDone ? "#e6ffed" : "#fff5e6";
-    const fg = isDone ? "#1a7f37" : "#9a6700";
-    return `<span style="background:${bg}; color:${fg}; padding:0.2rem 0.5rem; border-radius:999px; font-size:0.85rem;">
+    const statusClass = isDone ? "success" : "pending";
+    const bgColor = isDone ? "#e6fffa" : "#fff5f5";
+    const textColor = isDone ? "var(--success)" : "var(--danger)";
+    const borderColor = isDone ? "var(--success)" : "var(--danger)";
+
+    return `<span class="badge" style="background: ${bgColor}; color: ${textColor}; border: 1px solid ${borderColor};">
       ${status || "unknown"}
     </span>`;
   }
@@ -88,23 +117,30 @@
     });
 
     bodyEl.innerHTML = "";
-    emptyEl.style.display = filtered.length ? "none" : "block";
 
-    filtered.forEach(p => {
-      const tr = document.createElement("tr");
-      tr.style.borderBottom = "1px solid #f0f0f0";
-      tr.innerHTML = `
-        <td style="padding:0.75rem;">${fmtDate(p.created_at)}</td>
-        <td style="padding:0.75rem;">${badge(p.status)}</td>
-        <td style="padding:0.75rem; font-weight:600;">${fmtMoney(p.amount, p.currency)}</td>
-        <td style="padding:0.75rem;">${p.payer_name || "-"}</td>
-        <td style="padding:0.75rem;">${p.expense_id ?? "-"}</td>
-        <td style="padding:0.75rem; font-family: monospace;">
-          ${p.transaction_id || "-"}
-        </td>
-      `;
-      bodyEl.appendChild(tr);
-    });
+    if (filtered.length === 0) {
+      tableContainer.style.display = "none";
+      emptyEl.style.display = "block";
+    } else {
+      tableContainer.style.display = "block";
+      emptyEl.style.display = "none";
+
+      filtered.forEach(p => {
+        const tr = document.createElement("tr");
+        tr.style.borderBottom = "1px solid var(--border)";
+        tr.innerHTML = `
+            <td style="padding: 1rem 0.75rem; font-size: 0.9rem;">${fmtDate(p.created_at)}</td>
+            <td style="padding: 1rem 0.75rem;">${badge(p.status)}</td>
+            <td style="padding: 1rem 0.75rem; font-weight: 700; color: var(--primary);">${fmtMoney(p.amount, p.currency)}</td>
+            <td style="padding: 1rem 0.75rem; font-size: 0.9rem;">${p.payer_name || "-"}</td>
+            <td style="padding: 1rem 0.75rem; font-size: 0.9rem; font-weight: 600;">#${p.expense_id ?? "-"}</td>
+            <td style="padding: 1rem 0.75rem; font-family: monospace; font-size: 0.8rem; color: var(--text-light);">
+              ${p.transaction_id || "-"}
+            </td>
+          `;
+        bodyEl.appendChild(tr);
+      });
+    }
   }
 
   async function loadPayments() {
@@ -122,6 +158,6 @@
   searchInput.addEventListener("input", render);
 
   loadPayments();
-  setInterval(loadPayments, 3000);
+  setInterval(loadPayments, 5000);
 </script>
 {% endblock %}

@@ -17,7 +17,7 @@
         <img id="previewImage" class="preview-image hidden" alt="Receipt preview">
         <input type="file" id="receiptInput" accept="image/*" hidden>
     </div>
-    <div class="flex-center gap-1 mt-1">
+    <div class="flex-row gap-1 mt-1">
         <button type="button" id="scanBtn" class="btn-primary" disabled>Scan</button>
         <button type="button" id="clearImageBtn" class="btn-secondary hidden">Clear</button>
     </div>
@@ -27,11 +27,11 @@
 <!-- Scanned Items Preview -->
 <section id="scannedPreview" class="card hidden">
     <h2>Scanned Items</h2>
-    <p class="hint">Review before adding</p>
+    <p class="hint mb-1">Review before adding to list</p>
     <ul id="scannedItems" class="list-group"></ul>
-    <div class="btn-group">
-        <button type="button" id="addAllBtn" class="btn-primary">Add All</button>
-        <button type="button" id="clearScanBtn" class="btn-secondary">Cancel</button>
+    <div class="flex-row gap-1 mt-1">
+        <button type="button" id="addAllBtn" class="btn-primary flex-1">Add All</button>
+        <button type="button" id="clearScanBtn" class="btn-secondary flex-1">Cancel</button>
     </div>
 </section>
 
@@ -51,36 +51,59 @@
         </fieldset>
         <button type="submit">+</button>
     </form>
+    <ul class="list-group mb-2" id="addItemSection">
+        <li class="list-item" style="border-bottom: 2px solid var(--primary); padding-bottom: 1rem;">
+            <div class="flex-1">
+                <input type="text" id="groceryName" name="name" placeholder="Add new item..." required
+                    class="input-transparent w-100">
+            </div>
+            <div class="flex-row items-center" style="gap: 0.75rem;">
+                <fieldset class="quantity-control">
+                    <button type="button" data-action="decrement">−</button>
+                    <output id="addItemQty">1</output>
+                    <button type="button" data-action="increment">+</button>
+                </fieldset>
+                <button type="button" id="addItemBtn" class="btn-primary"
+                    style="padding: 0 1.5rem; height: 40px;">Add</button>
+            </div>
+        </li>
+    </ul>
 
     <ul id="groceryList" class="list-group">
         {% for item in items %}
         <li data-id="{{ item.id }}" class="list-item {% if item.selected %}selected{% endif %}">
-            <label class="checkbox">
+            <label class="checkbox flex-shrink-0">
                 <input type="checkbox" name="selected" {{ ' checked' if item.selected else '' }}>
             </label>
-            <input type="text" name="name" value="{{ item.name }}" class="input-transparent" style="flex:1;">
-            <fieldset class="quantity-control">
-                <button type="button" data-action="decrement">−</button>
-                <output>{{ item.quantity }}</output>
-                <button type="button" data-action="increment">+</button>
-            </fieldset>
-            <label class="input-group">
-                <span>$</span>
-                <input type="number" name="price" value="{{ item.price or '' }}" step="0.01" min="0" placeholder="0.00">
-            </label>
-            <button type="button" data-action="delete" class="btn-icon">×</button>
+            <div class="flex-1">
+                <input type="text" name="name" value="{{ item.name }}" class="input-transparent w-100"
+                    placeholder="Item name">
+            </div>
+            <div class="flex-row items-center gap-05">
+                <fieldset class="quantity-control">
+                    <button type="button" data-action="decrement">−</button>
+                    <output>{{ item.quantity }}</output>
+                    <button type="button" data-action="increment">+</button>
+                </fieldset>
+                <div class="input-group">
+                    <span>$</span>
+                    <input type="number" name="price" value="{{ item.price if item.price is not none else '0.00' }}"
+                        step="0.01" min="0" placeholder="0.00">
+                </div>
+                <button type="button" data-action="delete" class="btn-icon">×</button>
+            </div>
         </li>
         {% else %}
         <li class="empty-state">No items yet</li>
         {% endfor %}
     </ul>
 
-    <footer class="card-footer">
-        <div class="flex-between">
-            <span><output id="selectedCount">0</output> selected</span>
-            <strong>Total: $<output id="totalPrice">0.00</output></strong>
+    <footer class="card-footer" style="margin-top: 1.5rem;">
+        <div class="flex-between" style="margin-bottom: 0.75rem;">
+            <span class="text-light"><output id="selectedCount">0</output> selected</span>
+            <span class="item-amount">Total: $<output id="totalPrice">0.00</output></span>
         </div>
-        <button type="button" id="payBtn" class="btn-primary mt-1" disabled>Pay for Selected</button>
+        <button type="button" id="payBtn" class="btn-primary w-100" disabled>Pay for Selected</button>
     </footer>
 </section>
 
@@ -109,7 +132,9 @@
             scannedItems: $("#scannedItems"),
             addAllBtn: $("#addAllBtn"),
             clearScanBtn: $("#clearScanBtn"),
-            addItemForm: $("#addItemForm"),
+            addItemSection: $("#addItemSection"),
+            addItemName: $("#groceryName"),
+            addItemBtn: $("#addItemBtn"),
             groceryList: $("#groceryList"),
             totalPrice: $("#totalPrice"),
             selectedCount: $("#selectedCount"),
@@ -213,17 +238,28 @@
         };
 
         const renderScanned = () => {
-            el.scannedItems.innerHTML = scannedData.map((item, i) => `
+            el.scannedItems.innerHTML = scannedData.map((item, i) => {
+                const unitPrice = item.unit_price != null ? item.unit_price : (item.price != null && item.quantity ? (item.price / item.quantity) : null);
+                return `
       <li data-index="${i}" class="list-item">
-        <input type="text" name="name" value="${escapeHtml(item.name)}" class="input-transparent" style="flex:1;">
-        <input type="number" name="quantity" value="${item.quantity}" min="1" class="input-transparent" style="width:50px;text-align:center;">
-        <div class="input-group">
-            <span>$</span>
-            <input type="number" name="price" value="${item.price || ""}" step="0.01" placeholder="0.00">
+        <div class="flex-1">
+            <input type="text" name="name" value="${escapeHtml(item.name)}" class="input-transparent w-100" placeholder="Item name">
         </div>
-        <button type="button" data-action="remove" class="btn-icon">×</button>
+        <div class="flex-row items-center gap-05">
+            <fieldset class="quantity-control">
+                <button type="button" data-action="decrement">−</button>
+                <output>${item.quantity || 1}</output>
+                <button type="button" data-action="increment">+</button>
+            </fieldset>
+            <div class="input-group">
+                <span>$</span>
+                <input type="number" name="unit_price" value="${unitPrice != null ? unitPrice.toFixed(2) : "0.00"}" step="0.01" min="0" class="input-transparent" placeholder="0.00">
+            </div>
+            <button type="button" data-action="remove" class="btn-icon">×</button>
+        </div>
       </li>
-    `).join("");
+    `;
+            }).join("");
             el.scannedPreview.classList.remove("hidden");
         };
 
@@ -234,11 +270,16 @@
         };
 
         const addAllScanned = async () => {
-            const items = $$("#scannedItems li").map(li => ({
-                name: $("[name=name]", li).value.trim(),
-                quantity: parseInt($("[name=quantity]", li).value) || 1,
-                price: parseFloat($("[name=price]", li).value) || null
-            })).filter(i => i.name);
+            const items = $$("#scannedItems li").map(li => {
+                const qty = parseInt($("output", li)?.textContent) || 1;
+                const unitPrice = parseFloat($("[name=unit_price]", li).value) || null;
+                const price = unitPrice != null ? +(unitPrice * qty).toFixed(2) : null;
+                return {
+                    name: $("[name=name]", li).value.trim(),
+                    quantity: qty,
+                    price
+                };
+            }).filter(i => i.name);
             if (!items.length) return;
             try {
                 await api("/groceries/bulk-add", "POST", { items });
@@ -254,30 +295,32 @@
             li.dataset.id = id;
             li.className = "list-item";
             li.innerHTML = `
-      <label class="checkbox"><input type="checkbox" name="selected"></label>
-      <input type="text" name="name" value="${escapeHtml(name)}" class="input-transparent" style="flex:1;">
-      <fieldset class="quantity-control">
-        <button type="button" data-action="decrement">−</button>
-        <output>${quantity}</output>
-        <button type="button" data-action="increment">+</button>
-      </fieldset>
-      <label class="input-group">
-        <span>$</span>
-        <input type="number" name="price" value="${price || ""}" step="0.01" min="0" placeholder="0.00">
-      </label>
-      <button type="button" data-action="delete" class="btn-icon">×</button>
+      <label class="checkbox flex-shrink-0"><input type="checkbox" name="selected"></label>
+      <div class="flex-1">
+          <input type="text" name="name" value="${escapeHtml(name)}" class="input-transparent w-100" placeholder="Item name">
+      </div>
+      <div class="flex-row items-center gap-05">
+          <fieldset class="quantity-control">
+            <button type="button" data-action="decrement">−</button>
+            <output>${quantity}</output>
+            <button type="button" data-action="increment">+</button>
+          </fieldset>
+          <div class="input-group">
+            <span>$</span>
+            <input type="number" name="price" value="${price || "0.00"}" step="0.01" min="0" placeholder="0.00">
+          </div>
+          <button type="button" data-action="delete" class="btn-icon">×</button>
+      </div>
     `;
             return li;
         };
 
         // CRUD operations
-        const addItem = async (e) => {
-            e.preventDefault();
-            const form = e.target;
-            const name = form.name.value.trim();
+        const addItem = async () => {
+            const name = el.addItemName.value.trim();
             if (!name) return;
             try {
-                const qtyOutput = $("#addItemQty", form);
+                const qtyOutput = $("#addItemQty", el.addItemSection);
                 const quantity = parseInt(qtyOutput.textContent) || 1;
 
                 const item = await api("/groceries/add", "POST", {
@@ -290,6 +333,9 @@
                 form.reset();
                 qtyOutput.textContent = "1";
                 form.name.focus();
+                el.addItemName.value = "";
+                qtyOutput.textContent = "1";
+                el.addItemName.focus();
                 updateItemCount();
             } catch (e) {
                 alert(e.message);
@@ -351,12 +397,23 @@
 
         // Event: Scanned items
         el.scannedItems.addEventListener("click", (e) => {
-            if (e.target.dataset.action === "remove") {
-                const i = parseInt(e.target.closest("li").dataset.index);
+            const li = e.target.closest("li");
+            if (!li) return;
+            const action = e.target.dataset.action;
+
+            if (action === "remove") {
+                const i = parseInt(li.dataset.index);
                 scannedData.splice(i, 1);
                 scannedData.length ? renderScanned() : clearScanned();
+            } else if (action === "increment" || action === "decrement") {
+                const output = $("output", li);
+                let qty = parseInt(output?.textContent) || 1;
+                if (action === "increment") output.textContent = ++qty;
+                else if (qty > 1) output.textContent = --qty;
             }
         });
+
+
 
         // Event: Add item form
         el.addItemForm.addEventListener("click", (e) => {
@@ -375,6 +432,24 @@
         });
 
         el.addItemForm.addEventListener("submit", addItem);
+        el.addItemSection.addEventListener("click", (e) => {
+            const btn = e.target.closest("button");
+            if (!btn) return;
+
+            const action = btn.dataset.action;
+            if (action) {
+                const output = $("#addItemQty", el.addItemSection);
+                let qty = parseInt(output.textContent) || 1;
+                if (action === "increment") output.textContent = ++qty;
+                else if (action === "decrement" && qty > 1) output.textContent = --qty;
+            } else if (btn.id === "addItemBtn") {
+                addItem();
+            }
+        });
+
+        el.addItemName.addEventListener("keypress", (e) => {
+            if (e.key === "Enter") addItem();
+        });
 
         // Event: Grocery list
         el.groceryList.addEventListener("click", (e) => {
@@ -419,6 +494,14 @@
 
         // Event: Pay button
         el.payBtn.addEventListener("click", paySelected);
+
+        // Event: Format money inputs to 2 decimal places on blur
+        document.addEventListener("blur", (e) => {
+            if (e.target.matches(".input-group input[type='number']")) {
+                const val = parseFloat(e.target.value);
+                if (!isNaN(val)) e.target.value = val.toFixed(2);
+            }
+        }, true);
 
         // Initialize
         updateTotals();

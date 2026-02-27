@@ -15,9 +15,6 @@ from flask import Flask, render_template, request, redirect, url_for, flash, ses
 from flask_sqlalchemy import SQLAlchemy
 from flask_mail import Mail, Message
 from sqlalchemy.orm import relationship
-from datetime import datetime, timedelta
-from werkzeug.security import generate_password_hash, check_password_hash
-from functools import wraps
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash, check_password_hash
 from PIL import Image
@@ -200,6 +197,11 @@ def get_current_user():
     return user
 
 
+@app.context_processor
+def inject_user():
+    return dict(current_user=get_current_user())
+
+
 def require_group(user):
     return None if user.group_id else redirect(url_for('group'))
 
@@ -351,7 +353,12 @@ def parse_receipt_with_claude(image_bytes):
     Each item:
     - "name": item name only (exclude codes/quantities)
     - "amt": quantity (parse from EA/QTY/@, default 1)
+<<<<<<< HEAD
     - "price": line total (not unit price)
+=======
+    - "unit_price": price per single unit
+    - "price": line total (qty × unit_price)
+>>>>>>> 3590173c9a9322bef6c883cae56ef7b2502bee5d
 
     Ignore tax/subtotals. JSON only.
     """
@@ -384,6 +391,7 @@ def parse_receipt_with_claude(image_bytes):
                 {
                     'name': item.get('name', ''),
                     'quantity': item.get('amt', 1),
+                    'unit_price': item.get('unit_price'),
                     'price': item.get('price')
                 }
                 for item in data.get('items', [])
@@ -476,6 +484,11 @@ def register():
         if len(password) < 6:
             flash('Password must be at least 6 characters')
             return render_template('register.html', google_client_id=GOOGLE_CLIENT_ID)
+        existing_user = User.query.filter_by(email=email).first()
+        if existing_user and existing_user.password and check_password_hash(existing_user.password, password):
+            session['user_id'] = existing_user.id
+            return redirect(url_for('home') if existing_user.group_id else url_for('group'))
+
         user = User(email=email, password=generate_password_hash(password), auth_provider='email')
         try:
             db.session.add(user)
@@ -887,7 +900,7 @@ def stripe_webhook():
         s = event["data"]["object"]
         p = Payment.query.filter_by(stripe_session_id=s["id"]).first()
         if p:
-            p.status = "completed"
+            p.status = "confirmed"
             p.stripe_payment_intent_id = s.get("payment_intent")
             db.session.commit()
 
@@ -1169,4 +1182,4 @@ with app.app_context():
     db.create_all()
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5050)
+    app.run(debug=True, port=5000)

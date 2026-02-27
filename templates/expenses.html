@@ -6,102 +6,61 @@
 
 <header class="page-header">
   <h1>Household Expenses</h1>
-  <p class="subtitle">Track and split shared costs</p>
+  <p class="subtitle">Track and split shared household costs</p>
 </header>
 
-<section class="card create-expense">
+<section class="card">
   <h2>Add Expense</h2>
   <div class="form-row-flexible">
-    <div class="form-group flex-1 min-w-120">
+    <div class="form-group flex-2">
       <label for="expense-description">Description</label>
-      <input id="expense-description" type="text" placeholder="e.g., Groceries, Utilities"
-        aria-label="Expense Description" />
+      <input id="expense-description" type="text" placeholder="e.g., Groceries, Utilities" class="form-input" />
     </div>
-    <div class="form-group flex-1 min-w-120">
+    <div class="form-group flex-1">
       <label for="expense-amount">Amount ($)</label>
-      <input id="expense-amount" type="number" step="0.01" min="0" placeholder="0.00" aria-label="Amount" />
+      <input id="expense-amount" type="number" step="0.01" min="0" placeholder="0.00" class="form-input" />
     </div>
-    <div class="form-group flex-1 min-w-140">
+    <div class="form-group flex-1">
       <label for="expense-date">Date</label>
-      <input id="expense-date" type="date" aria-label="Date" />
+      <input id="expense-date" type="date" class="form-input" />
     </div>
-    <div class="form-group flex-1 min-w-140">
-      <label for="paid-by">Paid By</label>
-      <select id="paid-by" aria-label="Paid By User"></select>
+    <div class="form-group flex-1">
+      <label>Paid By</label>
+      <div id="paid-by-container"></div>
     </div>
-    <button id="add-expense-btn" class="btn-primary" style="margin-bottom: 1rem;">Add</button>
+    <div class="form-group">
+      <label>&nbsp;</label>
+      <button id="add-expense-btn" class="btn-primary" style="height: 40px;">Add</button>
+    </div>
   </div>
 
-  <div class="toggle-group">
+  <div class="toggle-group mt-1">
     <button id="split-even-btn" class="toggle-btn active">Split Evenly</button>
     <button id="split-custom-btn" class="toggle-btn">Custom Split</button>
   </div>
 
-  <div id="custom-split-container" class="toggle-content">
+  <div id="custom-split-container" class="toggle-content mt-1">
     <h3 style="font-size: 1rem; margin-bottom: 0.75rem;">Custom Split (Percentage)</h3>
-    <div id="custom-split-users"></div>
-    <p id="split-total" style="margin-top: 0.5rem; font-size: 0.85rem; color: #666;"></p>
+    <div id="custom-split-users" class="flex-col gap-05"></div>
+    <p id="split-total" class="status-text mt-1"></p>
   </div>
 </section>
 
-<section class="card expense-list">
-  <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-    <h2 style="margin: 0;">Expense History</h2>
-    <div style="display: flex; gap: 0.5rem;">
-      <select id="filter-user" style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">
+<section class="card">
+  <header class="flex-between mb-1">
+    <h2 class="m-0">Expense History</h2>
+    <div class="flex-row items-center gap-05">
+      <label for="filter-user" class="m-0 text-light" style="font-size: 0.85rem;">Filter:</label>
+      <select id="filter-user" class="form-input"
+        style="height: 32px; font-size: 0.85rem; padding: 0 0.5rem; width: auto; min-width: 140px;">
         <option value="">All Users</option>
       </select>
     </div>
   </header>
-  <div id="expense-list-container"></div>
+  <div id="expense-list-container" class="list-group"></div>
 </section>
 
-<a href="{{ url_for('home') }}" class="back-link" style="margin-top:1rem;color:#666;display:inline-block;">← Back</a>
-
-<!-- Edit Modal -->
-<div id="edit-modal" class="modal">
-  <div class="modal-content">
-    <div class="modal-header">
-      <h3>Edit Expense</h3>
-      <button class="close-modal" onclick="closeEditModal()">&times;</button>
-    </div>
-    <div class="form-group" style="margin-bottom: 1rem;">
-      <label for="edit-description">Description</label>
-      <input id="edit-description" type="text"
-        style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;" />
-    </div>
-    <div class="form-group" style="margin-bottom: 1rem;">
-      <label for="edit-amount">Amount ($)</label>
-      <input id="edit-amount" type="number" step="0.01" min="0"
-        style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;" />
-    </div>
-    <div class="form-group" style="margin-bottom: 1rem;">
-      <label for="edit-date">Date</label>
-      <input id="edit-date" type="date"
-        style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;" />
-    </div>
-    <div class="form-group" style="margin-bottom: 1rem;">
-      <label for="edit-paid-by">Paid By</label>
-      <select id="edit-paid-by"
-        style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;"></select>
-    </div>
-    <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
-      <button onclick="closeEditModal()" class="btn-secondary">Cancel</button>
-      <button onclick="saveEdit()" class="btn-primary">Save Changes</button>
-    </div>
-  </div>
-</div>
-
-<!-- View Details Modal -->
-<div id="details-modal" class="modal">
-  <div class="modal-content">
-    <div class="modal-header">
-      <h3>Expense Details</h3>
-      <button class="close-modal" onclick="closeDetailsModal()">&times;</button>
-    </div>
-    <div id="details-content"></div>
-  </div>
-</div>
+<a href="{{ url_for('home') }}" class="back-link">← Back</a>
 
 
 <script>
@@ -113,7 +72,8 @@
   const descriptionInput = document.getElementById("expense-description");
   const amountInput = document.getElementById("expense-amount");
   const dateInput = document.getElementById("expense-date");
-  const paidBySelect = document.getElementById("paid-by");
+  const paidByContainer = document.getElementById("paid-by-container");
+
   const addBtn = document.getElementById("add-expense-btn");
   const splitEvenBtn = document.getElementById("split-even-btn");
   const splitCustomBtn = document.getElementById("split-custom-btn");
@@ -127,6 +87,7 @@
   let splitMode = "even";
   let customSplits = {};
   let currentEditId = null;
+  let paidByDropdown = null;
 
   // Set today's date as default
   dateInput.valueAsDate = new Date();
@@ -135,14 +96,16 @@
     const res = await fetch(USERS_API);
     users = await res.json();
 
-    // Populate paid-by select
-    paidBySelect.innerHTML = "";
-    users.forEach((u) => {
-      const opt = document.createElement("option");
-      opt.value = u.user_id;
-      opt.textContent = u.name;
-      paidBySelect.appendChild(opt);
+    const dropdownData = users.map(u => ({ id: u.user_id, label: u.name }));
+
+    // Initialize custom dropdowns
+    paidByDropdown = new CustomDropdown(paidByContainer, {
+      multiple: true,
+      placeholder: 'Select users...',
+      data: dropdownData
     });
+
+
 
     // Populate filter select
     filterUserSelect.innerHTML = '<option value="">All Users</option>';
@@ -151,16 +114,6 @@
       opt.value = u.user_id;
       opt.textContent = u.name;
       filterUserSelect.appendChild(opt);
-    });
-
-    // Populate edit modal select
-    const editPaidBy = document.getElementById("edit-paid-by");
-    editPaidBy.innerHTML = "";
-    users.forEach((u) => {
-      const opt = document.createElement("option");
-      opt.value = u.user_id;
-      opt.textContent = u.name;
-      editPaidBy.appendChild(opt);
     });
 
     // Initialize custom split
@@ -175,13 +128,16 @@
       customSplits[u.user_id] = 0;
 
       const row = document.createElement("div");
-      row.className = "flex-row items-center gap-05";
-      row.style.marginBottom = "0.5rem";
+      row.className = "flex-row items-center gap-1";
 
       const label = document.createElement("label");
       label.textContent = u.name;
-      label.className = "flex-1";
+      label.className = "flex-1 m-0";
       label.style.fontSize = "0.9rem";
+
+      const inputContainer = document.createElement("div");
+      inputContainer.className = "input-group";
+      inputContainer.style.width = "100px";
 
       const input = document.createElement("input");
       input.type = "number";
@@ -189,16 +145,20 @@
       input.max = "100";
       input.step = "0.01";
       input.value = "0";
-      input.style.width = "80px";
+      input.className = "input-transparent";
+      input.style.width = "100%";
       input.dataset.userId = u.user_id;
       input.addEventListener("input", updateSplitTotal);
 
       const percent = document.createElement("span");
       percent.textContent = "%";
+      percent.style.marginLeft = "0.25rem";
+
+      inputContainer.appendChild(input);
+      inputContainer.appendChild(percent);
 
       row.appendChild(label);
-      row.appendChild(input);
-      row.appendChild(percent);
+      row.appendChild(inputContainer);
       customSplitUsers.appendChild(row);
     });
 
@@ -215,11 +175,7 @@
     });
 
     splitTotalText.textContent = `Total: ${total.toFixed(2)}%`;
-    if (Math.abs(total - 100) < 0.01) {
-      splitTotalText.style.color = "#22863a";
-    } else {
-      splitTotalText.style.color = "#d73a49";
-    }
+    splitTotalText.className = "status-text mt-1 " + (Math.abs(total - 100) < 0.01 ? "success" : "error");
   }
 
   splitEvenBtn.addEventListener("click", () => {
@@ -237,9 +193,16 @@
   });
 
   async function fetchExpenses() {
-    const res = await fetch(API_BASE);
-    expenses = await res.json();
-    renderExpenses();
+    // Don't refresh while user is editing inline
+    if (currentEditId !== null) return;
+    try {
+      const res = await fetch(API_BASE);
+      if (!res.ok) return; // Don't wipe existing data on error
+      expenses = await res.json();
+      renderExpenses();
+    } catch (e) {
+      console.error('Failed to fetch expenses:', e);
+    }
   }
 
   function renderExpenses() {
@@ -255,66 +218,30 @@
 
     listContainer.innerHTML = "";
     if (!filtered.length) {
-      listContainer.innerHTML = '<p class="text-center" style="color: #999; padding: 2rem;">No expenses yet. Add one above.</p>';
+      listContainer.innerHTML = `
+        <div class="empty-state">
+            <p>No expenses found. Track shared costs by adding one above!</p>
+        </div>
+      `;
       return;
     }
 
     filtered.forEach((expense) => {
       const div = document.createElement("div");
       div.className = "list-item-complex";
+      div.id = `expense-row-${expense.expenseId}`;
 
-      const info = document.createElement("div");
-      info.className = "item-info";
+      try {
+        if (currentEditId === expense.expenseId) {
+          renderInlineEditForm(div, expense);
+        } else {
+          renderExpenseRow(div, expense);
+        }
+      } catch (err) {
+        console.error('Error rendering expense row:', expense.expenseId, err);
+        div.innerHTML = `<div class="item-info"><span class="item-title">${expense.description} — $${parseFloat(expense.amount).toFixed(2)}</span></div>`;
+      }
 
-      const splitInfo = expense.splits
-        .map(s => `${s.user_name}: $${s.amount.toFixed(2)} (${s.percentage.toFixed(1)}%)`)
-        .join(", ");
-
-      info.innerHTML = `
-        <div class="item-info-row">
-          <span class="item-title">${expense.description}</span>
-          <span class="item-amount">$${parseFloat(expense.amount).toFixed(2)}</span>
-        </div>
-        <div class="item-subtitle"><strong>Date:</strong> ${expense.date}</div>
-        <div class="item-subtitle"><strong>Paid by:</strong> ${expense.paidBy.name}</div>
-        <div class="item-subtitle"><strong>Split:</strong> ${splitInfo}</div>
-      `;
-
-      const actions = document.createElement("div");
-      actions.className = "item-actions";
-
-      const viewBtn = document.createElement("button");
-      viewBtn.textContent = "View";
-      viewBtn.className = "btn-sm btn-secondary";
-      viewBtn.onclick = () => viewExpenseDetails(expense);
-      actions.appendChild(viewBtn);
-
-      const editBtn = document.createElement("button");
-      editBtn.textContent = "Edit";
-      editBtn.className = "btn-sm btn-primary";
-      editBtn.onclick = () => openEditModal(expense);
-      actions.appendChild(editBtn);
-
-      const deleteBtn = document.createElement("button");
-      deleteBtn.textContent = "Delete";
-      deleteBtn.className = "btn-sm";
-      deleteBtn.style.background = "#e53e3e";
-      deleteBtn.style.color = "white";
-      deleteBtn.onclick = () => deleteExpense(expense.expenseId);
-      actions.appendChild(deleteBtn);
-
-
-      const payBtn = document.createElement("button");
-      payBtn.textContent = "Pay";
-      payBtn.className = "btn-sm";
-      payBtn.style.background = "#38a169";
-      payBtn.style.color = "white";
-      payBtn.onclick = () => payExpense(expense.expenseId);
-      actions.appendChild(payBtn);
-
-
-      div.appendChild(info);
-      div.appendChild(actions);
       listContainer.appendChild(div);
     });
   }
@@ -323,7 +250,8 @@
     const description = descriptionInput.value.trim();
     const amount = parseFloat(amountInput.value);
     const date = dateInput.value;
-    const paidByUserId = parseInt(paidBySelect.value);
+    const paidByValues = paidByDropdown.getSelectedValues();
+    const paidByUserId = paidByValues.length > 0 ? paidByValues[0] : null;
 
     if (!description || !amount || amount <= 0 || !date || !paidByUserId) {
       alert("Please fill in all fields with valid values.");
@@ -360,46 +288,202 @@
       descriptionInput.value = "";
       amountInput.value = "";
       dateInput.valueAsDate = new Date();
-      paidBySelect.selectedIndex = 0;
+      paidByDropdown.setValues([]);
       initializeCustomSplit();
-      await fetchExpenses();
+      // Force fetch even though currentEditId might be null
+      try {
+        const refreshRes = await fetch(API_BASE);
+        if (refreshRes.ok) {
+          expenses = await refreshRes.json();
+          renderExpenses();
+        }
+      } catch (e) {
+        console.error('Failed to refresh expenses:', e);
+      }
     }
   }
 
-  function openEditModal(expense) {
-    currentEditId = expense.expenseId;
-    document.getElementById("edit-description").value = expense.description;
-    document.getElementById("edit-amount").value = expense.amount;
-    document.getElementById("edit-date").value = expense.date;
-    document.getElementById("edit-paid-by").value = expense.paidBy.user_id;
-    document.getElementById("edit-modal").classList.add("active");
+  function renderExpenseRow(div, expense) {
+    // Determine per-user payment status
+    const paidUserIds = new Set();
+    if (expense.payments && expense.payments.length) {
+      expense.payments.forEach(p => {
+        const s = (p.status || '').toLowerCase();
+        if (['completed', 'confirmed', 'paid', 'succeeded', 'success'].includes(s)) {
+          paidUserIds.add(p.user_id);
+        }
+      });
+    }
+    // The payer is always considered "paid"
+    paidUserIds.add(expense.paidBy.user_id);
+
+    const allPaid = expense.splits.every(s => paidUserIds.has(s.user_id));
+    const statusLabel = allPaid ? 'Completed' : 'Pending';
+    const statusStyle = allPaid
+      ? 'background: #e6fffa; color: var(--success); border: 1px solid var(--success);'
+      : 'background: #fff5f5; color: var(--danger); border: 1px solid var(--danger);';
+
+    // Build split breakdown HTML with payment indicators
+    const splitRows = expense.splits.map(s => {
+      const hasPaid = paidUserIds.has(s.user_id);
+      const indicator = hasPaid
+        ? `<span style="color: var(--success); font-weight: 600;">\u2705 Paid</span>`
+        : `<span style="color: #e07c00; font-weight: 600;">\u23F3 Unpaid</span>`;
+      return `
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.2rem 0; font-size: 0.85rem;">
+          <span>${s.user_name}</span>
+          <span style="display: flex; gap: 0.75rem; align-items: center;">
+            <span style="font-weight: 600;">$${s.amount.toFixed(2)}</span>
+            <span class="text-light" style="font-size: 0.8rem;">(${s.percentage.toFixed(1)}%)</span>
+            ${indicator}
+          </span>
+        </div>`;
+    }).join('');
+
+    const info = document.createElement("div");
+    info.className = "item-info";
+    info.style.flex = '1';
+    info.innerHTML = `
+      <div class="item-info-row">
+        <span class="item-title">${expense.description}</span>
+        <span style="display: flex; gap: 0.5rem; align-items: center;">
+          <span class="item-amount" style="color: var(--primary);">$${parseFloat(expense.amount).toFixed(2)}</span>
+          <span class="badge" style="${statusStyle}">${statusLabel}</span>
+        </span>
+      </div>
+      <div class="item-subtitle"><strong>Date:</strong> ${expense.date}</div>
+      <div class="item-subtitle"><strong>Paid by:</strong> ${expense.paidBy.name}</div>
+      <div style="margin-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 0.5rem;">
+        <div style="font-size: 0.85rem; font-weight: 600; margin-bottom: 0.25rem;">Split Breakdown</div>
+        ${splitRows}
+      </div>
+    `;
+
+    const actions = document.createElement("div");
+    actions.className = "item-actions vertical flex-col gap-05";
+
+    const mainActions = document.createElement("div");
+    mainActions.className = "flex-row gap-05";
+
+    const editBtn = document.createElement("button");
+    editBtn.textContent = "Edit";
+    editBtn.className = "btn-secondary";
+    editBtn.style.padding = "0.25rem 0.75rem";
+    editBtn.style.fontSize = "0.85rem";
+    editBtn.style.height = "32px";
+    editBtn.onclick = () => startInlineEdit(expense.expenseId);
+    mainActions.appendChild(editBtn);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.textContent = "Delete";
+    deleteBtn.className = "btn-secondary";
+    deleteBtn.style.padding = "0.25rem 0.75rem";
+    deleteBtn.style.fontSize = "0.85rem";
+    deleteBtn.style.height = "32px";
+    deleteBtn.style.color = "var(--danger)";
+    deleteBtn.onclick = () => deleteExpense(expense.expenseId);
+    mainActions.appendChild(deleteBtn);
+
+    actions.appendChild(mainActions);
+
+    if (!allPaid) {
+      const payBtn = document.createElement("button");
+      payBtn.textContent = "Pay via Stripe";
+      payBtn.className = "btn-primary w-100";
+      payBtn.style.fontSize = "0.85rem";
+      payBtn.style.height = "32px";
+      payBtn.onclick = () => payExpense(expense.expenseId);
+      actions.appendChild(payBtn);
+    }
+
+    div.appendChild(info);
+    div.appendChild(actions);
   }
 
-  function closeEditModal() {
+  function renderInlineEditForm(div, expense) {
+    div.innerHTML = '';
+    div.style.flexDirection = 'column';
+    div.style.gap = '0.75rem';
+
+    const dropdownData = users.map(u => ({ id: u.user_id, label: u.name }));
+
+    div.innerHTML = `
+      <div class="form-row-flexible" style="width: 100%;">
+        <div class="form-group flex-2">
+          <label>Description</label>
+          <input data-field="desc" type="text" class="form-input" value="${expense.description}" />
+        </div>
+        <div class="form-group flex-1">
+          <label>Amount ($)</label>
+          <input data-field="amt" type="number" step="0.01" min="0" class="form-input" value="${expense.amount}" />
+        </div>
+        <div class="form-group flex-1">
+          <label>Date</label>
+          <input data-field="date" type="date" class="form-input" value="${expense.date}" />
+        </div>
+        <div class="form-group flex-1">
+          <label>Paid By</label>
+          <div data-field="paidby"></div>
+        </div>
+      </div>
+      <div class="flex-row gap-05 justify-end">
+        <button class="btn-secondary" data-action="cancel">Cancel</button>
+        <button class="btn-primary" data-action="save">Save Changes</button>
+      </div>
+    `;
+
+    // Use div.querySelector to find elements within the detached div (not yet in document)
+    const paidByEl = div.querySelector('[data-field="paidby"]');
+    const inlineDropdown = new CustomDropdown(paidByEl, {
+      multiple: true,
+      placeholder: 'Select users...',
+      data: dropdownData
+    });
+    inlineDropdown.setValues([expense.paidBy.user_id]);
+
+    div.querySelector('[data-action="cancel"]').onclick = () => cancelInlineEdit();
+    div.querySelector('[data-action="save"]').onclick = () => saveInlineEdit(expense.expenseId, inlineDropdown, div);
+  }
+
+  function startInlineEdit(expenseId) {
+    currentEditId = expenseId;
+    renderExpenses();
+  }
+
+  function cancelInlineEdit() {
     currentEditId = null;
-    document.getElementById("edit-modal").classList.remove("active");
+    renderExpenses();
   }
 
-  async function saveEdit() {
-    const description = document.getElementById("edit-description").value.trim();
-    const amount = parseFloat(document.getElementById("edit-amount").value);
-    const date = document.getElementById("edit-date").value;
-    const paidByUserId = parseInt(document.getElementById("edit-paid-by").value);
+  async function saveInlineEdit(expenseId, inlineDropdown, div) {
+    const description = div.querySelector('[data-field="desc"]').value.trim();
+    const amount = parseFloat(div.querySelector('[data-field="amt"]').value);
+    const date = div.querySelector('[data-field="date"]').value;
+    const paidByValues = inlineDropdown.getSelectedValues();
+    const paidByUserId = paidByValues.length > 0 ? paidByValues[0] : null;
 
     if (!description || !amount || amount <= 0 || !date || !paidByUserId) {
       alert("Please fill in all fields with valid values.");
       return;
     }
 
-    const res = await fetch(`${API_BASE}/${currentEditId}`, {
+    const res = await fetch(`${API_BASE}/${expenseId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ description, amount, date, paidByUserId }),
     });
 
     if (res.ok) {
-      closeEditModal();
-      await fetchExpenses();
+      currentEditId = null;
+      try {
+        const refreshRes = await fetch(API_BASE);
+        if (refreshRes.ok) {
+          expenses = await refreshRes.json();
+          renderExpenses();
+        }
+      } catch (e) {
+        console.error('Failed to refresh expenses:', e);
+      }
     }
   }
 
@@ -415,117 +499,39 @@
     }
   }
 
-  function viewExpenseDetails(expense) {
-    const content = document.getElementById("details-content");
-    const paymentsHTML = expense.payments && expense.payments.length
-      ? `
-        <div class="summary-card">
-          <h4 style="margin-top: 0;">Payment Details</h4>
-          ${expense.payments.map(p => `
-            <div class="summary-row">
-              <span>Transaction ID:</span>
-              <span>${p.transaction_id}</span>
-          </div>
-          <div class="summary-row">
-            <span>Date:</span>
-            <span>${p.created_at || "N/A"}</span>
-          </div>
-          <div class="summary-row">
-            <span>Amount:</span>
-            <span>$${(p.amount_cents / 100).toFixed(2)}</span>
-          </div>
-          <div class="summary-row">
-            <span>Status:</span>
-            <span>${p.status}</span>
-          </div>s
-        `).join('')}
-      </div>
-    `
-    : `
-      <div class="summary-card">
-        <h4 style="margin-top: 0;">Payment Details</h4>
-        <div class="summary-row">
-          <span>No payments recorded yet.</span>
-        </div>
-      </div>
-    `;
 
-    const summaryHTML = `
-      <div class="summary-card">
-        <h4 style="margin-top: 0;">Expense Summary</h4>
-        <div class="summary-row">
-          <span>Description:</span>
-          <span><strong>${expense.description}</strong></span>
-        </div>
-        <div class="summary-row">
-          <span>Total Amount:</span>
-          <span><strong>$${parseFloat(expense.amount).toFixed(2)}</strong></span>
-        </div>
-        <div class="summary-row">
-          <span>Date:</span>
-          <span>${expense.date}</span>
-        </div>
-        <div class="summary-row">
-          <span>Paid By:</span>
-          <span>${expense.paidBy.name}</span>
-        </div>
-      </div>
 
-      <div class="summary-card">
-        <h4 style="margin-top: 0;">Split Breakdown</h4>
-        ${expense.splits.map(s => `
-          <div class="summary-row">
-            <span>${s.user_name}</span>
-            <span>$${s.amount.toFixed(2)} (${s.percentage.toFixed(1)}%)</span>
-          </div>
-        `).join('')}
-      </div>
-
-      ${paymentsHTML}
-    `;
-
-    content.innerHTML = summaryHTML;
-    document.getElementById("details-modal").classList.add("active");
-  }
-
-  function closeDetailsModal() {
-    document.getElementById("details-modal").classList.remove("active");
-  }
 
   async function payExpense(expenseId) {
-  try {
+    try {
+      const res = await fetch(`${API_BASE}/${expenseId}/pay`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
 
-    const res = await fetch(API_BASE, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ description, amount, date, paidByUserId, splits }),
-    });
+      if (!res.ok) {
+        alert(data.error || "Payment failed");
+        return;
+      }
 
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      console.log("Create expense failed:", data);
-      alert(data.error || "Failed to create expense");
-      return;
+      // Redirect to Stripe Checkout
+      window.location.href = data.checkout_url;
+    } catch (e) {
+      alert("Network error starting payment");
+      console.error(e);
     }
-
-    window.location.href = data.checkout_url;
-
-  } catch (e) {
-    alert("Network error starting payment");
-    console.error(e);
   }
-}
 
-// Wire up buttons + initial load
-addBtn.addEventListener("click", createExpense);
-filterUserSelect.addEventListener("change", renderExpenses);
+  // Wire up buttons + initial load
+  addBtn.addEventListener("click", createExpense);
+  filterUserSelect.addEventListener("change", renderExpenses);
 
-// Initial page load
-(async function init() {
-  await loadUsers();
-  await fetchExpenses();
-})();
-  
-  
+  // Initial page load
+  (async function init() {
+    await loadUsers();
+    await fetchExpenses();
+  })();
+
+  // Optional: auto-refresh every 5s
+  setInterval(fetchExpenses, 5000);
+
 </script>
 {% endblock %}

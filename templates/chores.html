@@ -3,6 +3,7 @@
 {% block title %}Household Chores{% endblock %}
 
 {% block content %}
+HEAD
 <style>
   .form-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
   .create-chore input[type="text"] { flex: 2; }
@@ -27,44 +28,68 @@
   }
 </style>
 
+
 <header class="page-header">
   <h1>Household Chores</h1>
-  <p class="subtitle">Manage shared tasks</p>
+  <p class="subtitle">Manage shared tasks and assignments</p>
 </header>
 
-<section class="card create-chore">
+<!-- Create Chore Form -->
+<section class="card">
   <h2>Create Chore</h2>
-  <div class="form-row">
-    <input id="chore-name" type="text" placeholder="Chore name" aria-label="Chore Name" />
-    <input id="chore-due" type="date" aria-label="Due Date" />
-    <select id="assigned-users" multiple aria-label="Assign Users"></select>
-    <button id="add-chore-btn" class="btn-primary">Add</button>
+  <div class="form-row-flexible">
+    <div class="form-group flex-2">
+      <label for="chore-name">Chore Name</label>
+      <input id="chore-name" type="text" placeholder="e.g., Take out trash" class="form-input" />
+    </div>
+    <div class="form-group flex-1">
+      <label for="chore-due">Due Date</label>
+      <input id="chore-due" type="date" class="form-input" />
+    </div>
+    <div class="form-group flex-2">
+      <label>Assign To</label>
+      <div id="assign-dropdown-container"></div>
+    </div>
+    <div class="form-group">
+      <label>&nbsp;</label>
+      <button id="add-chore-btn" class="btn-primary" style="height: 40px;">Add</button>
+    </div>
   </div>
-  <p class="hint">Hold Ctrl (Cmd on Mac) to select multiple users.</p>
 </section>
 
 <section class="card chore-list">
   <header style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
     <h2 style="margin:0;">Chore List</h2>
+<!-- Chore List -->
+<section class="card">
+  <header class="flex-between mb-1">
+    <h2>Chore List</h2>
   </header>
-  <div id="chore-list-container"></div>
+  <div id="chore-list-container" class="list-group"></div>
 </section>
 
-<a href="{{ url_for('home') }}" class="back-link" style="margin-top:1rem;color:#666;display:inline-block;">
-  ← Back
-</a>
+<a href="{{ url_for('home') }}" class="back-link">← Back</a>
 
 <script>
+  /* ==================== Constants ==================== */
+
   const API_BASE = "/api/chores";
   const USERS_API = "/api/users";
 
+  /* ==================== State ==================== */
+
   let allUsers = [];
+  let assignDropdown = null;
+
+  /* ==================== DOM Elements ==================== */
 
   const listContainer = document.getElementById("chore-list-container");
   const nameInput = document.getElementById("chore-name");
   const dueInput = document.getElementById("chore-due");
   const addBtn = document.getElementById("add-chore-btn");
-  const assignedSelect = document.getElementById("assigned-users");
+  const assignContainer = document.getElementById("assign-dropdown-container");
+
+  /* ==================== API Functions ==================== */
 
   async function loadUsers() {
     try {
@@ -97,19 +122,32 @@
     }
   }
 
-  function getSelectedAssignedUserIds() {
+  async function getSelectedAssignedUserIds() {
     return Array.from(assignedSelect.selectedOptions).map(opt => parseInt(opt.value, 10));
+    const res = await fetch(USERS_API);
+    allUsers = await res.json();
+
+    const dropdownData = allUsers.map(u => ({ id: u.user_id, label: u.name }));
+
+    assignDropdown = new CustomDropdown(assignContainer, {
+      multiple: false,
+      placeholder: 'Select user...',
+      data: dropdownData
+    });
+  }
+
+  async function fetchChores() {
+    const res = await fetch(API_BASE);
+    const data = await res.json();
+    renderChores(data);
   }
 
   async function createChore() {
     const name = nameInput.value.trim();
     const nextDueBy = dueInput.value || null;
-    const assignedUserIds = getSelectedAssignedUserIds();
+    const assignedUserIds = assignDropdown.getSelectedValues();
 
-    if (!name) {
-      alert("Please enter a chore name.");
-      return;
-    }
+    if (!name) return;
 
     const res = await fetch(API_BASE, {
       method: "POST",
@@ -120,7 +158,7 @@
     if (res.ok) {
       nameInput.value = "";
       dueInput.value = "";
-      Array.from(assignedSelect.options).forEach(opt => opt.selected = false);
+      assignDropdown.setValues([]);
       await fetchChores();
     }
   }
@@ -137,7 +175,9 @@
       body: JSON.stringify({ completedByUserId: parseInt(completedByUserId, 10) }),
     });
 
-    if (res.ok) await fetchChores();
+    if (res.ok) {
+      await fetchChores();
+    }
   }
 
   async function autoAssignChore(choreId) {
@@ -230,7 +270,7 @@
     });
   }
 
-  addBtn.addEventListener("click", createChore);
+  /* ==================== Helper Functions ==================== */
 
   loadUsers().then(fetchChores);
   setInterval(fetchChores, 3000);
