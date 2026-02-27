@@ -386,6 +386,8 @@
 
     actions.appendChild(mainActions);
 
+    console.log("expense", expense.expenseId, "allPaid=", allPaid, expense);
+
     if (!allPaid) {
       const payBtn = document.createElement("button");
       payBtn.textContent = "Pay via Stripe";
@@ -504,6 +506,8 @@
   async function payExpense(expenseId) {
     const res = await fetch(`${API_BASE}/${expenseId}/pay`, { method: "POST" });
     const data = await res.json();
+
+    console.log("stripe response:", data);
 
     if (!res.ok) {
       alert(data.error || "Payment failed");
