@@ -42,15 +42,6 @@
         <span class="badge" id="itemCount">{{ items|length }} items</span>
     </header>
 
-    <form id="addItemForm" class="form-row">
-        <input type="text" name="name" placeholder="Add item..." required class="form-input">
-        <fieldset class="quantity-control">
-            <button type="button" data-action="decrement">−</button>
-            <output id="addItemQty">1</output>
-            <button type="button" data-action="increment">+</button>
-        </fieldset>
-        <button type="submit">+</button>
-    </form>
     <ul class="list-group mb-2" id="addItemSection">
         <li class="list-item" style="border-bottom: 2px solid var(--primary); padding-bottom: 1rem;">
             <div class="flex-1">
@@ -330,9 +321,6 @@
                 });
                 $(".empty-state", el.groceryList)?.remove();
                 el.groceryList.appendChild(createItem(item));
-                form.reset();
-                qtyOutput.textContent = "1";
-                form.name.focus();
                 el.addItemName.value = "";
                 qtyOutput.textContent = "1";
                 el.addItemName.focus();
@@ -416,22 +404,6 @@
 
 
         // Event: Add item form
-        el.addItemForm.addEventListener("click", (e) => {
-            if (e.target.tagName !== "BUTTON") return;
-            const action = e.target.dataset.action;
-            if (!action) return; // e.g. submit button
-
-            const output = $("#addItemQty", el.addItemForm);
-            let qty = parseInt(output.textContent) || 1;
-
-            if (action === "increment") {
-                output.textContent = ++qty;
-            } else if (action === "decrement" && qty > 1) {
-                output.textContent = --qty;
-            }
-        });
-
-        el.addItemForm.addEventListener("submit", addItem);
         el.addItemSection.addEventListener("click", (e) => {
             const btn = e.target.closest("button");
             if (!btn) return;
