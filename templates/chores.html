@@ -69,7 +69,7 @@
 
     const dropdownData = allUsers.map(u => ({ id: u.user_id, label: u.name }));
 
-    assignDropdown = new CustomDropdown(assignContainer, {
+    assignDropdown = new CustomDropdown(assignContainer, { // TODO: error when no other users
       multiple: false,
       placeholder: 'Select user...',
       data: dropdownData
@@ -85,7 +85,7 @@
   async function createChore() {
     const name = nameInput.value.trim();
     const nextDueBy = dueInput.value || null;
-    const assignedUserIds = assignDropdown.getSelectedValues();
+    const assignedUserIds = assignDropdown.getSelectedValues(); // TODO: error when dropdown is null
 
     if (!name) return;
 
@@ -260,6 +260,14 @@
       autoBtn.style.width = "100%";
       autoBtn.onclick = () => autoAssignChore(chore.choreId);
       actions.appendChild(autoBtn);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.textContent = "Delete";
+      deleteBtn.className = "btn-sm";
+      deleteBtn.style.background = "#e53e3e";
+      deleteBtn.style.color = "white";
+      deleteBtn.onclick = () => deleteChore(chore.choreId);
+      actions.appendChild(deleteBtn);
 
       // Assemble and append
       div.appendChild(info);
