@@ -209,6 +209,7 @@ def require_group(user):
 # =============================================================================
 # EMAIL HELPERS
 # =============================================================================
+# currently incomplete, awaiting account creation and link
 
 def send_expense_reminder_email(debtor_email, debtor_name, creditor_name, amount, description):
     """Send a reminder email to someone who owes money."""
