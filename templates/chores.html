@@ -130,6 +130,30 @@
     }
   }
 
+  
+async function deleteChore(choreId) {
+  if (!confirm("Delete this chore?")) return;
+
+  const res = await fetch(`${API_BASE}/${choreId}`, { method: "DELETE" });
+  const data = await res.json();
+
+  if (data.deleted) {
+    await fetchChores();
+  } else {
+    alert(data.error || "Failed to delete chore.");
+  }
+}
+
+  async function deleteChore(choreId) {
+    const res = await fetch(`${API_BASE}/${choreId}`, {
+      method: "DELETE",
+    });
+
+    if (res.ok) {
+      await fetchChores();
+    }
+  }
+
   /* ==================== Helper Functions ==================== */
 
   function createUserDropdown(choreId, assignedUsers) {
@@ -262,10 +286,11 @@
       actions.appendChild(autoBtn);
 
       const deleteBtn = document.createElement("button");
-      deleteBtn.textContent = "Delete";
-      deleteBtn.className = "btn-sm";
-      deleteBtn.style.background = "#e53e3e";
-      deleteBtn.style.color = "white";
+      deleteBtn.innerHTML = "<span>Delete</span>";
+      deleteBtn.className = "btn-secondary";
+      deleteBtn.style.fontSize = "0.85rem";
+      deleteBtn.style.height = "32px";
+      deleteBtn.style.width = "100%";
       deleteBtn.onclick = () => deleteChore(chore.choreId);
       actions.appendChild(deleteBtn);
 

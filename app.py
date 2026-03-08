@@ -353,12 +353,9 @@ def parse_receipt_with_claude(image_bytes):
     Each item:
     - "name": item name only (exclude codes/quantities)
     - "amt": quantity (parse from EA/QTY/@, default 1)
-<<<<<<< HEAD
     - "price": line total (not unit price)
-=======
     - "unit_price": price per single unit
     - "price": line total (qty × unit_price)
->>>>>>> 3590173c9a9322bef6c883cae56ef7b2502bee5d
 
     Ignore tax/subtotals. JSON only.
     """
@@ -826,6 +823,22 @@ def auto_assign_chore_route(chore_id):
     chore.completed = False
     db.session.commit()
     return jsonify(chore_to_dict(chore))
+
+
+@app.route("/api/chores/<int:chore_id>", methods=["DELETE"])
+@login_required
+def delete_chore(chore_id):
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    chore = Chore.query.filter_by(id=chore_id, group_id=user.group_id).first()
+    if not chore:
+        return jsonify({"error": "Chore not found"}), 404
+
+    db.session.delete(chore)
+    db.session.commit()
+    return jsonify({"deleted": True})
 
 
 # =============================================================================
