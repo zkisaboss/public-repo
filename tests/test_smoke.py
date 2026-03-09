@@ -83,6 +83,10 @@ class TestProtectedPages:
         resp = auth_client.get('/expenses')
         assert resp.status_code == 200
 
+    def test_account_loads(self, auth_client):
+        resp = auth_client.get('/account')
+        assert resp.status_code == 200
+
 
 
 class TestUnauthenticatedRedirects:
@@ -105,6 +109,11 @@ class TestUnauthenticatedRedirects:
 
     def test_expenses_redirects(self, client):
         resp = client.get('/expenses')
+        assert resp.status_code == 302
+        assert '/login' in resp.headers['Location']
+
+    def test_account_redirects(self, client):
+        resp = client.get('/account')
         assert resp.status_code == 302
         assert '/login' in resp.headers['Location']
 

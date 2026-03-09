@@ -80,6 +80,7 @@ class User(db.Model):
     password = db.Column(db.String(255), nullable=True)  # Nullable for OAuth users
     auth_provider = db.Column(db.String(20), default='email')  # 'email', 'google'
     group_id = db.Column(db.Integer, db.ForeignKey('groups.id'))
+    stripe_account_id = db.Column(db.String(255), nullable=True)  # Stripe Connect Express
     group = relationship('Group', backref='users')
 
 
@@ -618,6 +619,15 @@ def expenses():
     return render_template('expenses.html', group=user.group)
 
 
+@app.route('/account')
+@login_required
+def account():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for('login'))
+    return render_template('account.html', user=user)
+
+
 
 
 # =============================================================================
@@ -653,15 +663,38 @@ def add_grocery():
     name = data.get('name', '').strip()
     if not name:
         return jsonify({'error': 'Name required'}), 400
+    price = data.get('price')
+    quantity = data.get('quantity', 1)
+
+    # Check for existing item with same name and price
+    existing = GroceryItem.query.filter(
+        GroceryItem.group_id == user.group_id,
+        db.func.lower(GroceryItem.name) == name.lower(),
+        GroceryItem.purchased == False
+    ).first()
+
+    if existing and existing.price == price:
+        existing.quantity = (existing.quantity or 1) + (quantity or 1)
+        db.session.commit()
+        return jsonify({
+            'id': existing.id, 'name': existing.name,
+            'quantity': existing.quantity, 'price': existing.price,
+            'merged': True
+        })
+
     item = GroceryItem(
         name=name,
-        quantity=data.get('quantity', 1),
-        price=data.get('price'),
+        quantity=quantity,
+        price=price,
         group_id=user.group_id
     )
     db.session.add(item)
     db.session.commit()
-    return jsonify({'id': item.id, 'name': item.name, 'quantity': item.quantity, 'price': item.price})
+    return jsonify({
+        'id': item.id, 'name': item.name,
+        'quantity': item.quantity, 'price': item.price,
+        'merged': False
+    })
 
 
 @app.route('/groceries/bulk-add', methods=['POST'])
@@ -1025,7 +1058,7 @@ def pay_expense(expense_id):
 
     try:
         base_url = os.environ.get("BASE_URL", request.host_url.rstrip("/"))
-        checkout_session = stripe.checkout.Session.create(
+        session_params = dict(
             mode="payment",
             payment_method_types=["card"],
             line_items=[{
@@ -1048,6 +1081,15 @@ def pay_expense(expense_id):
                 "group_id": str(user.group_id),
             },
         )
+
+        # Route payment to the expense creator's connected Stripe account
+        creditor = expense.paid_by
+        if creditor.stripe_account_id:
+            session_params["payment_intent_data"] = {
+                "transfer_data": {"destination": creditor.stripe_account_id}
+            }
+
+        checkout_session = stripe.checkout.Session.create(**session_params)
     except Exception as e:
         return jsonify({"error": f"Stripe error: {str(e)}"}), 500
 
@@ -1078,8 +1120,16 @@ def pay_groceries():
 
     data = request.get_json()
     item_ids = data.get("item_ids", [])
+    recipient_user_id = data.get("recipient_user_id")
     if not item_ids:
         return jsonify({"error": "No items selected"}), 400
+
+    # Validate recipient
+    recipient = None
+    if recipient_user_id:
+        recipient = User.query.filter_by(id=recipient_user_id, group_id=user.group_id).first()
+        if not recipient:
+            return jsonify({"error": "Invalid recipient"}), 400
 
     items = GroceryItem.query.filter(
         GroceryItem.id.in_(item_ids),
@@ -1112,7 +1162,7 @@ def pay_groceries():
 
     try:
         base_url = os.environ.get("BASE_URL", request.host_url.rstrip("/"))
-        checkout_session = stripe.checkout.Session.create(
+        session_params = dict(
             mode="payment",
             payment_method_types=["card"],
             line_items=line_items,
@@ -1125,6 +1175,14 @@ def pay_groceries():
                 "group_id": str(user.group_id),
             },
         )
+
+        # Route payment to recipient's connected Stripe account
+        if recipient and recipient.stripe_account_id:
+            session_params["payment_intent_data"] = {
+                "transfer_data": {"destination": recipient.stripe_account_id}
+            }
+
+        checkout_session = stripe.checkout.Session.create(**session_params)
     except Exception as e:
         return jsonify({"error": f"Stripe error: {str(e)}"}), 500
 
@@ -1190,6 +1248,96 @@ def stripe_webhook():
     return jsonify({"received": True}), 200
 
 
+# =============================================================================
+# ACCOUNT MANAGEMENT ROUTES
+# =============================================================================
+
+@app.route("/account/connect-stripe", methods=["POST"])
+@login_required
+def connect_stripe():
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    try:
+        # Create a Stripe Express connected account
+        acct = stripe.Account.create(
+            type="express",
+            email=user.email,
+            capabilities={
+                "card_payments": {"requested": True},
+                "transfers": {"requested": True},
+            },
+        )
+
+        user.stripe_account_id = acct.id
+        db.session.commit()
+
+        base_url = os.environ.get("BASE_URL", request.host_url.rstrip("/"))
+        link = stripe.AccountLink.create(
+            account=acct.id,
+            refresh_url=f"{base_url}/account/stripe-callback?refresh=1",
+            return_url=f"{base_url}/account/stripe-callback",
+            type="account_onboarding",
+        )
+        return jsonify({"url": link.url})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/account/stripe-callback")
+@login_required
+def stripe_callback():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for("login"))
+
+    if request.args.get("refresh"):
+        # User needs to restart onboarding
+        if user.stripe_account_id:
+            try:
+                base_url = os.environ.get("BASE_URL", request.host_url.rstrip("/"))
+                link = stripe.AccountLink.create(
+                    account=user.stripe_account_id,
+                    refresh_url=f"{base_url}/account/stripe-callback?refresh=1",
+                    return_url=f"{base_url}/account/stripe-callback",
+                    type="account_onboarding",
+                )
+                return redirect(link.url)
+            except Exception:
+                pass
+
+    flash("Stripe account connected successfully!")
+    return redirect(url_for("account"))
+
+
+@app.route("/account/disconnect-stripe", methods=["POST"])
+@login_required
+def disconnect_stripe():
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    user.stripe_account_id = None
+    db.session.commit()
+    return jsonify({"success": True})
+
+
+@app.route("/account/delete", methods=["POST"])
+@login_required
+def delete_account():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for("login"))
+
+    # Delete user's related data
+    db.session.delete(user)
+    db.session.commit()
+    session.clear()
+    flash("Your account has been deleted.")
+    return redirect(url_for("login"))
+
+
 
 # =============================================================================
 # INIT
@@ -1197,6 +1345,30 @@ def stripe_webhook():
 
 with app.app_context():
     db.create_all()
+    # Migrate: add new columns to existing tables if missing
+    with db.engine.connect() as conn:
+        try:
+            conn.execute(db.text("ALTER TABLE users ADD COLUMN stripe_account_id VARCHAR(255)"))
+            conn.commit()
+        except Exception:
+            conn.rollback()  # Column already exists
+        try:
+            conn.execute(db.text(
+                "CREATE TABLE IF NOT EXISTS payments ("
+                "id INTEGER PRIMARY KEY, "
+                "user_id INTEGER NOT NULL, "
+                "group_id INTEGER NOT NULL, "
+                "expense_id INTEGER, "
+                "amount_cents INTEGER NOT NULL, "
+                "currency VARCHAR(3) DEFAULT 'usd', "
+                "status VARCHAR(20) DEFAULT 'pending', "
+                "stripe_session_id VARCHAR(255) UNIQUE NOT NULL, "
+                "stripe_payment_intent_id VARCHAR(255), "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
