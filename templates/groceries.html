@@ -94,6 +94,14 @@
             <span class="text-light"><output id="selectedCount">0</output> selected</span>
             <span class="item-amount">Total: $<output id="totalPrice">0.00</output></span>
         </div>
+        <div class="flex-row gap-1 items-center" style="margin-bottom: 0.75rem;">
+            <label for="payRecipient" class="m-0 text-light" style="font-size: 0.85rem; white-space: nowrap;">Pay
+                to:</label>
+            <select id="payRecipient" class="form-input"
+                style="height: 36px; font-size: 0.85rem; padding: 0 0.5rem; flex: 1;">
+                <option value="">Select recipient…</option>
+            </select>
+        </div>
         <button type="button" id="payBtn" class="btn-primary w-100" disabled>Pay for Selected</button>
     </footer>
 </section>
@@ -130,6 +138,7 @@
             totalPrice: $("#totalPrice"),
             selectedCount: $("#selectedCount"),
             payBtn: $("#payBtn"),
+            payRecipient: $("#payRecipient"),
             itemCount: $("#itemCount")
         };
 
@@ -355,8 +364,16 @@
         const paySelected = async () => {
             const ids = $$("#groceryList li.selected").map(li => li.dataset.id);
             if (!ids.length) return;
+            const recipientId = el.payRecipient.value;
+            if (!recipientId) {
+                alert("Please select a recipient to pay.");
+                return;
+            }
             try {
-                const data = await api("/groceries/pay", "POST", { item_ids: ids });
+                const data = await api("/groceries/pay", "POST", {
+                    item_ids: ids,
+                    recipient_user_id: parseInt(recipientId)
+                });
                 const url = data.checkout_url || data.checkoutUrl;
                 if (url) {
                     window.location.href = url;
@@ -482,6 +499,22 @@
 
         // Initialize
         updateTotals();
+
+        // Load group members for the pay recipient dropdown
+        (async () => {
+            try {
+                const res = await fetch('/api/users');
+                const users = await res.json();
+                users.forEach(u => {
+                    const opt = document.createElement('option');
+                    opt.value = u.user_id;
+                    opt.textContent = u.name;
+                    el.payRecipient.appendChild(opt);
+                });
+            } catch (e) {
+                console.error('Failed to load users for pay dropdown:', e);
+            }
+        })();
     })();
 </script>
 {% endblock %}

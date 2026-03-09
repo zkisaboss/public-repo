@@ -1,0 +1,157 @@
+{% extends 'base.html' %}
+{% block title %}Account Settings{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <h1>Account Settings</h1>
+    <p class="subtitle">Manage your profile and integrations</p>
+</header>
+
+<!-- Profile Info -->
+<section class="card">
+    <h2>👤 Profile</h2>
+    <ul class="list-group">
+        <li class="list-item">
+            <div class="flex-1"><strong>Email</strong></div>
+            <div>{{ user.email }}</div>
+        </li>
+        <li class="list-item">
+            <div class="flex-1"><strong>Sign-in Method</strong></div>
+            <div>
+                {% if user.auth_provider == 'google' %}
+                <span class="badge" style="background: #4285F4; color: #fff;">Google</span>
+                {% else %}
+                <span class="badge">Email & Password</span>
+                {% endif %}
+            </div>
+        </li>
+        <li class="list-item">
+            <div class="flex-1"><strong>Group</strong></div>
+            <div>
+                {% if user.group %}
+                {{ user.group.name }} <span class="text-light" style="font-size: 0.85rem;">({{ user.group.code
+                    }})</span>
+                {% else %}
+                <span class="text-light">Not in a group</span>
+                {% endif %}
+            </div>
+        </li>
+    </ul>
+</section>
+
+<!-- Stripe Connect -->
+<section class="card">
+    <h2>💳 Stripe Connect</h2>
+    <p class="text-light" style="margin-bottom: 1rem;">
+        Link your Stripe account to receive payments from group members when they pay for groceries or expenses.
+    </p>
+
+    <div id="stripe-status">
+        {% if user.stripe_account_id %}
+        <div class="list-group">
+            <div class="list-item"
+                style="background: rgba(72,187,120,0.1); border: 1px solid var(--success); border-radius: 8px;">
+                <div class="flex-1">
+                    <div style="font-weight: 600; color: var(--success);">✅ Stripe Connected</div>
+                    <div class="text-light" style="font-size: 0.85rem;">Account ID: {{ user.stripe_account_id[:12] }}…
+                    </div>
+                </div>
+                <button id="disconnect-btn" class="btn-secondary"
+                    style="color: var(--danger); border-color: var(--danger);">
+                    Disconnect
+                </button>
+            </div>
+        </div>
+        {% else %}
+        <div class="list-group">
+            <div class="list-item"
+                style="background: rgba(237,137,54,0.1); border: 1px solid #ed8936; border-radius: 8px;">
+                <div class="flex-1">
+                    <div style="font-weight: 600; color: #ed8936;">⚠️ Not Connected</div>
+                    <div class="text-light" style="font-size: 0.85rem;">Connect to receive payments from roommates</div>
+                </div>
+                <button id="connect-btn" class="btn-primary">
+                    Connect Stripe
+                </button>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</section>
+
+<!-- Danger Zone -->
+<section class="card" style="border: 1px solid var(--danger);">
+    <h2 style="color: var(--danger);">⚠️ Danger Zone</h2>
+    <p class="text-light" style="margin-bottom: 1rem;">
+        Permanently delete your account and all associated data. This action cannot be undone.
+    </p>
+    <button id="delete-btn" class="btn-secondary" style="color: var(--danger); border-color: var(--danger);">
+        Delete My Account
+    </button>
+</section>
+
+<a href="{{ url_for('home') }}" class="back-link" style="margin-top:1rem;color:#666;display:inline-block;">← Back</a>
+
+<script>
+    (function () {
+        const connectBtn = document.getElementById('connect-btn');
+        const disconnectBtn = document.getElementById('disconnect-btn');
+        const deleteBtn = document.getElementById('delete-btn');
+
+        if (connectBtn) {
+            connectBtn.addEventListener('click', async () => {
+                connectBtn.disabled = true;
+                connectBtn.textContent = 'Setting up…';
+                try {
+                    const res = await fetch('/account/connect-stripe', { method: 'POST' });
+                    const data = await res.json();
+                    if (data.url) {
+                        window.location.href = data.url;
+                    } else {
+                        alert(data.error || 'Failed to create Stripe account');
+                        connectBtn.disabled = false;
+                        connectBtn.textContent = 'Connect Stripe';
+                    }
+                } catch (e) {
+                    alert('Error connecting to Stripe');
+                    connectBtn.disabled = false;
+                    connectBtn.textContent = 'Connect Stripe';
+                }
+            });
+        }
+
+        if (disconnectBtn) {
+            disconnectBtn.addEventListener('click', async () => {
+                if (!confirm('Are you sure you want to disconnect your Stripe account? You will no longer receive payments.')) return;
+                try {
+                    const res = await fetch('/account/disconnect-stripe', { method: 'POST' });
+                    if (res.ok) {
+                        location.reload();
+                    } else {
+                        alert('Failed to disconnect');
+                    }
+                } catch (e) {
+                    alert('Error disconnecting Stripe');
+                }
+            });
+        }
+
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', async () => {
+                if (!confirm('Are you sure you want to permanently delete your account? This cannot be undone.')) return;
+                if (!confirm('This will delete ALL your data. Are you really sure?')) return;
+                try {
+                    const res = await fetch('/account/delete', { method: 'POST' });
+                    if (res.redirected) {
+                        window.location.href = res.url;
+                    } else {
+                        window.location.href = '/login';
+                    }
+                } catch (e) {
+                    alert('Error deleting account');
+                }
+            });
+        }
+    })();
+</script>
+{% endblock %}

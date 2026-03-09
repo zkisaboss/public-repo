@@ -80,6 +80,7 @@ class User(db.Model):
     password = db.Column(db.String(255), nullable=True)  # Nullable for OAuth users
     auth_provider = db.Column(db.String(20), default='email')  # 'email', 'google'
     group_id = db.Column(db.Integer, db.ForeignKey('groups.id'))
+    stripe_account_id = db.Column(db.String(255), nullable=True)  # Stripe Connect Express
     group = relationship('Group', backref='users')
 
 
@@ -618,6 +619,15 @@ def expenses():
     return render_template('expenses.html', group=user.group)
 
 
+@app.route('/account')
+@login_required
+def account():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for('login'))
+    return render_template('account.html', user=user)
+
+
 
 
 # =============================================================================
@@ -1025,7 +1035,7 @@ def pay_expense(expense_id):
 
     try:
         base_url = os.environ.get("BASE_URL", request.host_url.rstrip("/"))
-        checkout_session = stripe.checkout.Session.create(
+        session_params = dict(
             mode="payment",
             payment_method_types=["card"],
             line_items=[{
@@ -1048,6 +1058,15 @@ def pay_expense(expense_id):
                 "group_id": str(user.group_id),
             },
         )
+
+        # Route payment to the expense creator's connected Stripe account
+        creditor = expense.paid_by
+        if creditor.stripe_account_id:
+            session_params["payment_intent_data"] = {
+                "transfer_data": {"destination": creditor.stripe_account_id}
+            }
+
+        checkout_session = stripe.checkout.Session.create(**session_params)
     except Exception as e:
         return jsonify({"error": f"Stripe error: {str(e)}"}), 500
 
@@ -1078,8 +1097,16 @@ def pay_groceries():
 
     data = request.get_json()
     item_ids = data.get("item_ids", [])
+    recipient_user_id = data.get("recipient_user_id")
     if not item_ids:
         return jsonify({"error": "No items selected"}), 400
+
+    # Validate recipient
+    recipient = None
+    if recipient_user_id:
+        recipient = User.query.filter_by(id=recipient_user_id, group_id=user.group_id).first()
+        if not recipient:
+            return jsonify({"error": "Invalid recipient"}), 400
 
     items = GroceryItem.query.filter(
         GroceryItem.id.in_(item_ids),
@@ -1112,7 +1139,7 @@ def pay_groceries():
 
     try:
         base_url = os.environ.get("BASE_URL", request.host_url.rstrip("/"))
-        checkout_session = stripe.checkout.Session.create(
+        session_params = dict(
             mode="payment",
             payment_method_types=["card"],
             line_items=line_items,
@@ -1125,6 +1152,14 @@ def pay_groceries():
                 "group_id": str(user.group_id),
             },
         )
+
+        # Route payment to recipient's connected Stripe account
+        if recipient and recipient.stripe_account_id:
+            session_params["payment_intent_data"] = {
+                "transfer_data": {"destination": recipient.stripe_account_id}
+            }
+
+        checkout_session = stripe.checkout.Session.create(**session_params)
     except Exception as e:
         return jsonify({"error": f"Stripe error: {str(e)}"}), 500
 
@@ -1188,6 +1223,96 @@ def stripe_webhook():
                 db.session.commit()
 
     return jsonify({"received": True}), 200
+
+
+# =============================================================================
+# ACCOUNT MANAGEMENT ROUTES
+# =============================================================================
+
+@app.route("/account/connect-stripe", methods=["POST"])
+@login_required
+def connect_stripe():
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    try:
+        # Create a Stripe Express connected account
+        acct = stripe.Account.create(
+            type="express",
+            email=user.email,
+            capabilities={
+                "card_payments": {"requested": True},
+                "transfers": {"requested": True},
+            },
+        )
+
+        user.stripe_account_id = acct.id
+        db.session.commit()
+
+        base_url = os.environ.get("BASE_URL", request.host_url.rstrip("/"))
+        link = stripe.AccountLink.create(
+            account=acct.id,
+            refresh_url=f"{base_url}/account/stripe-callback?refresh=1",
+            return_url=f"{base_url}/account/stripe-callback",
+            type="account_onboarding",
+        )
+        return jsonify({"url": link.url})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/account/stripe-callback")
+@login_required
+def stripe_callback():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for("login"))
+
+    if request.args.get("refresh"):
+        # User needs to restart onboarding
+        if user.stripe_account_id:
+            try:
+                base_url = os.environ.get("BASE_URL", request.host_url.rstrip("/"))
+                link = stripe.AccountLink.create(
+                    account=user.stripe_account_id,
+                    refresh_url=f"{base_url}/account/stripe-callback?refresh=1",
+                    return_url=f"{base_url}/account/stripe-callback",
+                    type="account_onboarding",
+                )
+                return redirect(link.url)
+            except Exception:
+                pass
+
+    flash("Stripe account connected successfully!")
+    return redirect(url_for("account"))
+
+
+@app.route("/account/disconnect-stripe", methods=["POST"])
+@login_required
+def disconnect_stripe():
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    user.stripe_account_id = None
+    db.session.commit()
+    return jsonify({"success": True})
+
+
+@app.route("/account/delete", methods=["POST"])
+@login_required
+def delete_account():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for("login"))
+
+    # Delete user's related data
+    db.session.delete(user)
+    db.session.commit()
+    session.clear()
+    flash("Your account has been deleted.")
+    return redirect(url_for("login"))
 
 
 
