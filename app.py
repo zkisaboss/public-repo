@@ -2,7 +2,6 @@ import os
 import sys
 import secrets
 import re
-import stripe
 import json
 import base64
 import io
@@ -56,7 +55,6 @@ app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'RoomS
 db = SQLAlchemy(app)
 mail = Mail(app)
 
-stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
 BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5000')
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
@@ -126,7 +124,6 @@ class Expense(db.Model):
 
     paid_by = relationship('User', foreign_keys=[paid_by_user_id])
     splits = relationship('ExpenseSplit', backref='expense', cascade="all, delete-orphan")
-    payments = relationship('Payment', backref='expense', lazy=True)
 
 
 class ExpenseSplit(db.Model):
@@ -151,18 +148,6 @@ class ExpenseReminder(db.Model):
     split = db.relationship('ExpenseSplit', backref='reminders')
 
 
-class Payment(db.Model):
-    __tablename__ = 'payments'
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
-    expense_id = db.Column(db.Integer, db.ForeignKey('expenses.id'), nullable=True)
-    amount_cents = db.Column(db.Integer, nullable=False)
-    currency = db.Column(db.String(3), default='usd')
-    status = db.Column(db.String(20), default='pending')
-    stripe_session_id = db.Column(db.String(255), unique=True, nullable=False)
-    stripe_payment_intent_id = db.Column(db.String(255), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
 class GroceryItem(db.Model):
@@ -617,15 +602,6 @@ def expenses():
     return render_template('expenses.html', group=user.group)
 
 
-@app.route('/payments')
-@login_required
-def payments():
-    user = get_current_user()
-    if not user:
-        return redirect(url_for('login'))
-    if redirect_response := require_group(user):
-        return redirect_response
-    return render_template('payments.html', group=user.group)
 
 
 # =============================================================================
@@ -841,83 +817,6 @@ def delete_chore(chore_id):
     return jsonify({"deleted": True})
 
 
-# =============================================================================
-# PAYMENTS / STRIPE ROUTES
-# =============================================================================
-
-@app.route("/payments/create-checkout-session", methods=["POST"])
-@login_required
-def create_checkout_session():
-    user = get_current_user()
-    if not user or not user.group_id:
-        flash("You must be in a group to pay.")
-        return redirect(url_for("payments"))
-
-    amount_cents = int(request.form.get("amount_cents", "500"))
-    base_url = os.environ.get("BASE_URL", request.host_url.rstrip("/"))
-
-    checkout_session = stripe.checkout.Session.create(
-        mode="payment",
-        line_items=[{
-            "price_data": {
-                "currency": "usd",
-                "product_data": {"name": "RoomSync payment"},
-                "unit_amount": amount_cents,
-            },
-            "quantity": 1,
-        }],
-        success_url=f"{base_url}/payments/success?session_id={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{base_url}/payments/cancel",
-        metadata={"user_id": str(user.id), "group_id": str(user.group_id)},
-    )
-
-    p = Payment(
-        user_id=user.id,
-        group_id=user.group_id,
-        amount_cents=amount_cents,
-        currency="usd",
-        status="pending",
-        stripe_session_id=checkout_session.id
-    )
-    db.session.add(p)
-    db.session.commit()
-    return redirect(checkout_session.url, code=303)
-
-
-@app.route("/payments/success")
-@login_required
-def payments_success():
-    session_id = request.args.get("session_id")
-    return render_template("payment_success.html", session_id=session_id)
-
-
-@app.route("/payments/cancel")
-@login_required
-def payments_cancel():
-    return render_template("payment_cancel.html")
-
-
-@app.route("/payments/webhook", methods=["POST"])
-def stripe_webhook():
-    payload = request.get_data()
-    sig_header = request.headers.get("Stripe-Signature")
-    endpoint_secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
-    try:
-        event = stripe.Webhook.construct_event(
-            payload=payload, sig_header=sig_header, secret=endpoint_secret
-        )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-    if event["type"] == "checkout.session.completed":
-        s = event["data"]["object"]
-        p = Payment.query.filter_by(stripe_session_id=s["id"]).first()
-        if p:
-            p.status = "confirmed"
-            p.stripe_payment_intent_id = s.get("payment_intent")
-            db.session.commit()
-
-    return jsonify({"received": True}), 200
 
 
 # =============================================================================
@@ -947,14 +846,7 @@ def get_expenses():
             'percentage': float(s.percentage),
             'amount': float(s.amount)
         } for s in e.splits],
-        'payments': [{
-            'payment_id': p.id,
-            'user_id': p.user_id,
-            'amount_cents': p.amount_cents,
-            'status': p.status,
-            'transaction_id': p.stripe_session_id,
-            'created_at': p.created_at.isoformat() if p.created_at else None
-        } for p in e.payments]
+
     } for e in all_expenses])
 
 
@@ -1036,82 +928,6 @@ def delete_expense(expense_id):
     return jsonify({'success': True})
 
 
-@app.route("/api/expenses/<int:expense_id>/pay", methods=["POST"])
-@login_required
-def pay_expense(expense_id):
-    user = get_current_user()
-    if not user or not user.group_id:
-        return jsonify({"error": "Unauthorized"}), 401
-
-    expense = Expense.query.filter_by(id=expense_id, group_id=user.group_id).first()
-    if not expense:
-        return jsonify({"error": "Expense not found"}), 404
-
-    split = ExpenseSplit.query.filter_by(expense_id=expense.id, user_id=user.id).first()
-    if not split:
-        return jsonify({"error": "You are not part of this expense"}), 403
-
-    amount_cents = int(round(float(split.amount) * 100))
-    if amount_cents <= 0:
-        return jsonify({"error": "Nothing to pay for this expense"}), 400
-
-    if Payment.query.filter_by(
-        user_id=user.id, group_id=user.group_id,
-        expense_id=expense.id, status="completed"
-    ).first():
-        return jsonify({"error": "You already paid this expense"}), 400
-
-    try:
-        checkout_session = stripe.checkout.Session.create(
-            mode="payment",
-            payment_method_types=["card"],
-            line_items=[{
-                "price_data": {
-                    "currency": "usd",
-                    "product_data": {
-                        "name": f"Expense: {expense.description}",
-                        "description": f"Your share for expense #{expense.id}",
-                    },
-                    "unit_amount": amount_cents,
-                },
-                "quantity": 1,
-            }],
-            success_url=url_for("payments_success", _external=True)
-                        + "?session_id={CHECKOUT_SESSION_ID}",
-            cancel_url=url_for("payments_cancel", _external=True),
-            metadata={
-                "expense_id": str(expense.id),
-                "user_id": str(user.id),
-                "group_id": str(user.group_id),
-            },
-        )
-    except Exception as e:
-        return jsonify({"error": f"Stripe error: {str(e)}"}), 500
-
-    payment = Payment(
-        user_id=user.id,
-        group_id=user.group_id,
-        expense_id=expense.id,
-        amount_cents=amount_cents,
-        currency="usd",
-        status="pending",
-        stripe_session_id=checkout_session.id,
-    )
-    db.session.add(payment)
-    db.session.commit()
-
-    return jsonify({
-        "success": True,
-        "checkout_url": checkout_session.url,
-        "payment": {
-            "payment_id": payment.id,
-            "expense_id": payment.expense_id,
-            "amount_cents": payment.amount_cents,
-            "status": payment.status,
-            "transaction_id": payment.stripe_session_id,
-            "created_at": payment.created_at.isoformat() if payment.created_at else None
-        }
-    }), 201
 
 
 @app.route('/api/expenses/<int:expense_id>/remind/<int:user_id>', methods=['POST'])
@@ -1155,36 +971,6 @@ def send_expense_reminder(expense_id, user_id):
     return jsonify({'error': 'Failed to send reminder'}), 500
 
 
-@app.route("/api/payments", methods=["GET"])
-@login_required
-def get_payments():
-    user = get_current_user()
-    if not user or not user.group_id:
-        return jsonify({"error": "Unauthorized"}), 401
-
-    all_payments = Payment.query.filter_by(group_id=user.group_id).order_by(
-        Payment.created_at.desc()
-    ).all()
-
-    result = []
-    for p in all_payments:
-        payer = db.session.get(User, p.user_id)
-        status = (p.status or "pending").lower()
-        if status in ("paid", "succeeded", "success"):
-            status = "completed"
-        result.append({
-            "payment_id": p.id,
-            "expense_id": p.expense_id,
-            "payer_user_id": p.user_id,
-            "payer_name": payer.email.split("@")[0] if payer else str(p.user_id),
-            "amount": (float(p.amount_cents) / 100.0) if p.amount_cents is not None else 0.0,
-            "currency": p.currency or "usd",
-            "status": status,
-            "transaction_id": p.stripe_session_id,
-            "created_at": p.created_at.isoformat() if p.created_at else None,
-        })
-
-    return jsonify(result), 200
 
 
 # =============================================================================

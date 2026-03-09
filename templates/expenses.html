@@ -211,30 +211,7 @@
     let filtered = expenses;
 
 
-    // Check if any expense could show a Pay button
-let someoneCanPay = false;
 
-filtered.forEach(expense => {
-  const paidUserIds = new Set();
-  if (expense.payments) {
-    expense.payments.forEach(p => {
-      const s = (p.status || '').toLowerCase();
-      if (['completed','confirmed','paid','succeeded','success'].includes(s)) {
-        paidUserIds.add(p.user_id);
-      }
-    });
-  }
-
-  paidUserIds.add(expense.paidBy.user_id);
-
-  const currentUserSplit = expense.splits.find(s => s.user_id == CURRENT_USER_ID);
-  const currentUserHasPaid = paidUserIds.has(CURRENT_USER_ID);
-  const currentUserOwes = currentUserSplit && expense.paidBy.user_id != CURRENT_USER_ID;
-
-  if (currentUserOwes && !currentUserHasPaid) {
-    someoneCanPay = true;
-  }
-});
 
     if (filterUserId) {
       filtered = expenses.filter(e =>
@@ -249,25 +226,12 @@ filtered.forEach(expense => {
       listContainer.innerHTML = `
         <div class="empty-state">
           <p>No expenses found. Add one above!</p>
-          <p style="font-size:0.9rem; opacity:0.7;">
-            Payments appear when multiple users split an expense.
-          </p>
         </div>
       `;
       return;
     }
 
-    if (!someoneCanPay) {
-  const hint = document.createElement("div");
-  hint.className = "empty-state";
-  hint.innerHTML = `
-    <p>No payments needed yet.</p>
-    <p style="font-size:0.9rem; opacity:0.7;">
-      Payments appear when another roommate pays for something you share.
-    </p>
-  `;
-  listContainer.appendChild(hint);
-}
+
 
     filtered.forEach((expense) => {
       const div = document.createElement("div");
@@ -347,38 +311,14 @@ filtered.forEach(expense => {
   }
 
   function renderExpenseRow(div, expense) {
-    // Determine per-user payment status
-    const paidUserIds = new Set();
-    if (expense.payments && expense.payments.length) {
-      expense.payments.forEach(p => {
-        const s = (p.status || '').toLowerCase();
-        if (['completed', 'confirmed', 'paid', 'succeeded', 'success'].includes(s)) {
-          paidUserIds.add(p.user_id);
-        }
-      });
-    }
-    // The payer is always considered "paid"
-    paidUserIds.add(expense.paidBy.user_id);
-
-    const allPaid = expense.splits.every(s => paidUserIds.has(s.user_id));
-    const statusLabel = allPaid ? 'Completed' : 'Pending';
-    const statusStyle = allPaid
-      ? 'background: #e6fffa; color: var(--success); border: 1px solid var(--success);'
-      : 'background: #fff5f5; color: var(--danger); border: 1px solid var(--danger);';
-
-    // Build split breakdown HTML with payment indicators
+    // Build split breakdown HTML
     const splitRows = expense.splits.map(s => {
-      const hasPaid = paidUserIds.has(s.user_id);
-      const indicator = hasPaid
-        ? `<span style="color: var(--success); font-weight: 600;">\u2705 Paid</span>`
-        : `<span style="color: #e07c00; font-weight: 600;">\u23F3 Unpaid</span>`;
       return `
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.2rem 0; font-size: 0.85rem;">
           <span>${s.user_name}</span>
           <span style="display: flex; gap: 0.75rem; align-items: center;">
             <span style="font-weight: 600;">$${s.amount.toFixed(2)}</span>
             <span class="text-light" style="font-size: 0.8rem;">(${s.percentage.toFixed(1)}%)</span>
-            ${indicator}
           </span>
         </div>`;
     }).join('');
@@ -389,10 +329,7 @@ filtered.forEach(expense => {
     info.innerHTML = `
       <div class="item-info-row">
         <span class="item-title">${expense.description}</span>
-        <span style="display: flex; gap: 0.5rem; align-items: center;">
-          <span class="item-amount" style="color: var(--primary);">$${parseFloat(expense.amount).toFixed(2)}</span>
-          <span class="badge" style="${statusStyle}">${statusLabel}</span>
-        </span>
+        <span class="item-amount" style="color: var(--primary);">$${parseFloat(expense.amount).toFixed(2)}</span>
       </div>
       <div class="item-subtitle"><strong>Date:</strong> ${expense.date}</div>
       <div class="item-subtitle"><strong>Paid by:</strong> ${expense.paidBy.name}</div>
@@ -428,35 +365,6 @@ filtered.forEach(expense => {
     mainActions.appendChild(deleteBtn);
 
     actions.appendChild(mainActions);
-
-    // Debug
-  console.log("expense", expense.expenseId, "allPaid=", allPaid, expense);
-
-  // Show Pay button ONLY if the current user owes and hasn't paid yet
-  const currentUserSplit = expense.splits.find(s => s.user_id == CURRENT_USER_ID);
-  const currentUserHasPaid = paidUserIds.has(CURRENT_USER_ID);
-  const currentUserOwes = currentUserSplit && (expense.paidBy.user_id != CURRENT_USER_ID);
-
-
-  console.log("PAY DEBUG", {
-  CURRENT_USER_ID,
-  paidBy: expense.paidBy.user_id,
-  splitUserIds: expense.splits.map(s => s.user_id),
-  paidUserIds: Array.from(paidUserIds),
-  currentUserSplit,
-  currentUserHasPaid,
-  currentUserOwes
-});
-
-  if (currentUserOwes && !currentUserHasPaid) {
-    const payBtn = document.createElement("button");
-    payBtn.textContent = "Pay via Stripe";
-    payBtn.className = "btn-primary w-100";
-    payBtn.style.fontSize = "0.85rem";
-    payBtn.style.height = "32px";
-    payBtn.onclick = () => payExpense(expense.expenseId);
-    actions.appendChild(payBtn);
-  }
 
     div.appendChild(info);
     div.appendChild(actions);
@@ -562,26 +470,6 @@ filtered.forEach(expense => {
   }
 
 
-
-  async function payExpense(expenseId) {
-    const res = await fetch(`${API_BASE}/${expenseId}/pay`, { method: "POST" });
-    const data = await res.json();
-
-    console.log("stripe response:", data);
-
-    if (!res.ok) {
-      alert(data.error || "Payment failed");
-      return;
-    }
-
-    // Redirect to Stripe Checkout
-  const url = data.checkout_url || data.checkoutUrl;
-  if (!url) {
-    alert("No checkout url returned from backend. Check console log.");
-    return;
-  }
-  window.location.href = url;
-  }
 
   addBtn.addEventListener("click", createExpense);
   filterUserSelect.addEventListener("change", renderExpenses);
