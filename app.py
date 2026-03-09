@@ -34,8 +34,8 @@ app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-producti
 
 # Database Configuration
 database_url = os.environ.get('POSTGRES_URL') or os.environ.get('DATABASE_URL')
-if not database_url:
-    raise ValueError("Missing POSTGRES_URL or DATABASE_URL environment variable")
+if not database_url or not database_url.startswith(('postgres', 'postgresql', 'sqlite')):
+    database_url = 'sqlite:///household.db'
 if database_url.startswith('postgres://'):
     database_url = database_url.replace('postgres://', 'postgresql://', 1)
 
