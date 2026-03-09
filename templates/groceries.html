@@ -49,11 +49,10 @@
                     class="input-transparent w-100">
             </div>
             <div class="flex-row items-center" style="gap: 0.75rem;">
-                <fieldset class="quantity-control">
-                    <button type="button" data-action="decrement">−</button>
-                    <output id="addItemQty">1</output>
-                    <button type="button" data-action="increment">+</button>
-                </fieldset>
+                <div class="input-group">
+                    <span>$</span>
+                    <input type="number" id="addItemPrice" step="0.01" min="0" placeholder="0.00" style="width: 80px;">
+                </div>
                 <button type="button" id="addItemBtn" class="btn-primary"
                     style="padding: 0 1.5rem; height: 40px;">Add</button>
             </div>
@@ -78,8 +77,9 @@
                 </fieldset>
                 <div class="input-group">
                     <span>$</span>
-                    <input type="number" name="price" value="{{ item.price if item.price is not none else '0.00' }}"
-                        step="0.01" min="0" placeholder="0.00">
+                    <input type="number" name="price"
+                        value="{{ '%.2f' | format(item.price) if item.price is not none else '0.00' }}" step="0.01"
+                        min="0" placeholder="0.00">
                 </div>
                 <button type="button" data-action="delete" class="btn-icon">×</button>
             </div>
@@ -93,14 +93,6 @@
         <div class="flex-between" style="margin-bottom: 0.75rem;">
             <span class="text-light"><output id="selectedCount">0</output> selected</span>
             <span class="item-amount">Total: $<output id="totalPrice">0.00</output></span>
-        </div>
-        <div class="flex-row gap-1 items-center" style="margin-bottom: 0.75rem;">
-            <label for="payRecipient" class="m-0 text-light" style="font-size: 0.85rem; white-space: nowrap;">Pay
-                to:</label>
-            <select id="payRecipient" class="form-input"
-                style="height: 36px; font-size: 0.85rem; padding: 0 0.5rem; flex: 1;">
-                <option value="">Select recipient…</option>
-            </select>
         </div>
         <button type="button" id="payBtn" class="btn-primary w-100" disabled>Pay for Selected</button>
     </footer>
@@ -138,7 +130,6 @@
             totalPrice: $("#totalPrice"),
             selectedCount: $("#selectedCount"),
             payBtn: $("#payBtn"),
-            payRecipient: $("#payRecipient"),
             itemCount: $("#itemCount")
         };
 
@@ -307,7 +298,7 @@
           </fieldset>
           <div class="input-group">
             <span>$</span>
-            <input type="number" name="price" value="${price || "0.00"}" step="0.01" min="0" placeholder="0.00">
+            <input type="number" name="price" value="${price != null ? parseFloat(price).toFixed(2) : '0.00'}" step="0.01" min="0" placeholder="0.00">
           </div>
           <button type="button" data-action="delete" class="btn-icon">×</button>
       </div>
@@ -320,20 +311,29 @@
             const name = el.addItemName.value.trim();
             if (!name) return;
             try {
-                const qtyOutput = $("#addItemQty", el.addItemSection);
-                const quantity = parseInt(qtyOutput.textContent) || 1;
+                const priceInput = $("#addItemPrice", el.addItemSection);
+                const price = parseFloat(priceInput.value) || null;
 
-                const item = await api("/groceries/add", "POST", {
+                const data = await api("/groceries/add", "POST", {
                     name,
-                    quantity,
-                    price: null
+                    quantity: 1,
+                    price
                 });
-                $(".empty-state", el.groceryList)?.remove();
-                el.groceryList.appendChild(createItem(item));
-                el.addItemName.value = "";
-                qtyOutput.textContent = "1";
+                if (data.merged) {
+                    // Item was merged — update existing row
+                    const existingLi = $(`[data-id="${data.id}"]`, el.groceryList);
+                    if (existingLi) {
+                        const qtyOutput = $("output", existingLi);
+                        if (qtyOutput) qtyOutput.textContent = data.quantity;
+                    }
+                } else {
+                    $(".empty-state", el.groceryList)?.remove();
+                    el.groceryList.appendChild(createItem(data));
+                }
+                // Keep name and price in form so user can click Add again to increment
                 el.addItemName.focus();
                 updateItemCount();
+                updateTotals();
             } catch (e) {
                 alert(e.message);
             }
@@ -364,16 +364,8 @@
         const paySelected = async () => {
             const ids = $$("#groceryList li.selected").map(li => li.dataset.id);
             if (!ids.length) return;
-            const recipientId = el.payRecipient.value;
-            if (!recipientId) {
-                alert("Please select a recipient to pay.");
-                return;
-            }
             try {
-                const data = await api("/groceries/pay", "POST", {
-                    item_ids: ids,
-                    recipient_user_id: parseInt(recipientId)
-                });
+                const data = await api("/groceries/pay", "POST", { item_ids: ids });
                 const url = data.checkout_url || data.checkoutUrl;
                 if (url) {
                     window.location.href = url;
@@ -429,19 +421,14 @@
         el.addItemSection.addEventListener("click", (e) => {
             const btn = e.target.closest("button");
             if (!btn) return;
-
-            const action = btn.dataset.action;
-            if (action) {
-                const output = $("#addItemQty", el.addItemSection);
-                let qty = parseInt(output.textContent) || 1;
-                if (action === "increment") output.textContent = ++qty;
-                else if (action === "decrement" && qty > 1) output.textContent = --qty;
-            } else if (btn.id === "addItemBtn") {
-                addItem();
-            }
+            if (btn.id === "addItemBtn") addItem();
         });
 
         el.addItemName.addEventListener("keypress", (e) => {
+            if (e.key === "Enter") addItem();
+        });
+
+        $("#addItemPrice", el.addItemSection).addEventListener("keypress", (e) => {
             if (e.key === "Enter") addItem();
         });
 
@@ -499,22 +486,6 @@
 
         // Initialize
         updateTotals();
-
-        // Load group members for the pay recipient dropdown
-        (async () => {
-            try {
-                const res = await fetch('/api/users');
-                const users = await res.json();
-                users.forEach(u => {
-                    const opt = document.createElement('option');
-                    opt.value = u.user_id;
-                    opt.textContent = u.name;
-                    el.payRecipient.appendChild(opt);
-                });
-            } catch (e) {
-                console.error('Failed to load users for pay dropdown:', e);
-            }
-        })();
     })();
 </script>
 {% endblock %}

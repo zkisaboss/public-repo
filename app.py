@@ -663,15 +663,38 @@ def add_grocery():
     name = data.get('name', '').strip()
     if not name:
         return jsonify({'error': 'Name required'}), 400
+    price = data.get('price')
+    quantity = data.get('quantity', 1)
+
+    # Check for existing item with same name and price
+    existing = GroceryItem.query.filter(
+        GroceryItem.group_id == user.group_id,
+        db.func.lower(GroceryItem.name) == name.lower(),
+        GroceryItem.purchased == False
+    ).first()
+
+    if existing and existing.price == price:
+        existing.quantity = (existing.quantity or 1) + (quantity or 1)
+        db.session.commit()
+        return jsonify({
+            'id': existing.id, 'name': existing.name,
+            'quantity': existing.quantity, 'price': existing.price,
+            'merged': True
+        })
+
     item = GroceryItem(
         name=name,
-        quantity=data.get('quantity', 1),
-        price=data.get('price'),
+        quantity=quantity,
+        price=price,
         group_id=user.group_id
     )
     db.session.add(item)
     db.session.commit()
-    return jsonify({'id': item.id, 'name': item.name, 'quantity': item.quantity, 'price': item.price})
+    return jsonify({
+        'id': item.id, 'name': item.name,
+        'quantity': item.quantity, 'price': item.price,
+        'merged': False
+    })
 
 
 @app.route('/groceries/bulk-add', methods=['POST'])
@@ -1322,6 +1345,30 @@ def delete_account():
 
 with app.app_context():
     db.create_all()
+    # Migrate: add new columns to existing tables if missing
+    with db.engine.connect() as conn:
+        try:
+            conn.execute(db.text("ALTER TABLE users ADD COLUMN stripe_account_id VARCHAR(255)"))
+            conn.commit()
+        except Exception:
+            conn.rollback()  # Column already exists
+        try:
+            conn.execute(db.text(
+                "CREATE TABLE IF NOT EXISTS payments ("
+                "id INTEGER PRIMARY KEY, "
+                "user_id INTEGER NOT NULL, "
+                "group_id INTEGER NOT NULL, "
+                "expense_id INTEGER, "
+                "amount_cents INTEGER NOT NULL, "
+                "currency VARCHAR(3) DEFAULT 'usd', "
+                "status VARCHAR(20) DEFAULT 'pending', "
+                "stripe_session_id VARCHAR(255) UNIQUE NOT NULL, "
+                "stripe_payment_intent_id VARCHAR(255), "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

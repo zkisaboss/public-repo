@@ -1,96 +1,108 @@
 {% extends 'base.html' %}
-{% block title %}Account Settings{% endblock %}
+{% block title %}Account{% endblock %}
 
 {% block content %}
 <header class="page-header">
-    <h1>Account Settings</h1>
-    <p class="subtitle">Manage your profile and integrations</p>
+    <h1>Account</h1>
+    <p class="subtitle">{{ user.email }}</p>
 </header>
 
-<!-- Profile Info -->
+<!-- Profile -->
 <section class="card">
-    <h2>👤 Profile</h2>
+    <h2>Profile</h2>
     <ul class="list-group">
         <li class="list-item">
-            <div class="flex-1"><strong>Email</strong></div>
-            <div>{{ user.email }}</div>
+            <div class="flex-1">Email</div>
+            <div style="font-weight: 600;">{{ user.email }}</div>
         </li>
         <li class="list-item">
-            <div class="flex-1"><strong>Sign-in Method</strong></div>
-            <div>
-                {% if user.auth_provider == 'google' %}
-                <span class="badge" style="background: #4285F4; color: #fff;">Google</span>
-                {% else %}
-                <span class="badge">Email & Password</span>
-                {% endif %}
-            </div>
+            <div class="flex-1">Sign-in</div>
+            {% if user.auth_provider == 'google' %}
+            <span class="badge" style="background: #4285F4; color: #fff;">Google</span>
+            {% else %}
+            <span class="badge">Email</span>
+            {% endif %}
         </li>
         <li class="list-item">
-            <div class="flex-1"><strong>Group</strong></div>
-            <div>
-                {% if user.group %}
-                {{ user.group.name }} <span class="text-light" style="font-size: 0.85rem;">({{ user.group.code
-                    }})</span>
-                {% else %}
-                <span class="text-light">Not in a group</span>
-                {% endif %}
+            <div class="flex-1">Group</div>
+            {% if user.group %}
+            <div style="font-weight: 600;">{{ user.group.name }}
+                <span class="text-light" style="font-size: 0.85rem; font-weight: 400;">({{ user.group.code }})</span>
             </div>
+            {% else %}
+            <span class="text-light">No group</span>
+            {% endif %}
         </li>
     </ul>
 </section>
 
 <!-- Stripe Connect -->
 <section class="card">
-    <h2>💳 Stripe Connect</h2>
-    <p class="text-light" style="margin-bottom: 1rem;">
-        Link your Stripe account to receive payments from group members when they pay for groceries or expenses.
+    <h2>Stripe Connect</h2>
+    <p class="text-light" style="font-size: 0.9rem; margin-bottom: 1rem;">
+        Link your Stripe account to receive payments from roommates.
     </p>
-
-    <div id="stripe-status">
+    <ul class="list-group">
         {% if user.stripe_account_id %}
-        <div class="list-group">
-            <div class="list-item"
-                style="background: rgba(72,187,120,0.1); border: 1px solid var(--success); border-radius: 8px;">
-                <div class="flex-1">
-                    <div style="font-weight: 600; color: var(--success);">✅ Stripe Connected</div>
-                    <div class="text-light" style="font-size: 0.85rem;">Account ID: {{ user.stripe_account_id[:12] }}…
-                    </div>
-                </div>
-                <button id="disconnect-btn" class="btn-secondary"
-                    style="color: var(--danger); border-color: var(--danger);">
-                    Disconnect
-                </button>
+        <li class="list-item">
+            <div class="flex-1">
+                <div style="font-weight: 600; color: var(--success);">Connected</div>
+                <div class="text-light" style="font-size: 0.8rem;">{{ user.stripe_account_id[:16] }}…</div>
             </div>
-        </div>
+            <button id="disconnect-btn" class="btn-primary"
+                style="background: var(--danger); font-size: 0.85rem; padding: 0.4rem 1rem;">
+                Disconnect
+            </button>
+        </li>
         {% else %}
-        <div class="list-group">
-            <div class="list-item"
-                style="background: rgba(237,137,54,0.1); border: 1px solid #ed8936; border-radius: 8px;">
-                <div class="flex-1">
-                    <div style="font-weight: 600; color: #ed8936;">⚠️ Not Connected</div>
-                    <div class="text-light" style="font-size: 0.85rem;">Connect to receive payments from roommates</div>
-                </div>
-                <button id="connect-btn" class="btn-primary">
-                    Connect Stripe
-                </button>
+        <li class="list-item">
+            <div class="flex-1">
+                <div style="font-weight: 600;">Not connected</div>
+                <div class="text-light" style="font-size: 0.8rem;">Required to receive payments</div>
             </div>
-        </div>
+            <button id="connect-btn" class="btn-primary" style="font-size: 0.85rem; padding: 0.4rem 1rem;">
+                Connect Stripe
+            </button>
+        </li>
         {% endif %}
-    </div>
+    </ul>
+</section>
+
+<!-- Session -->
+<section class="card">
+    <h2>Session</h2>
+    <ul class="list-group">
+        <li class="list-item">
+            <div class="flex-1">
+                <div style="font-weight: 600;">Sign out</div>
+                <div class="text-light" style="font-size: 0.8rem;">End your session on this device</div>
+            </div>
+            <a href="{{ url_for('logout') }}" class="btn-secondary"
+                style="font-size: 0.85rem; padding: 0.4rem 1rem; text-decoration: none; text-align: center;">
+                Logout
+            </a>
+        </li>
+    </ul>
 </section>
 
 <!-- Danger Zone -->
-<section class="card" style="border: 1px solid var(--danger);">
-    <h2 style="color: var(--danger);">⚠️ Danger Zone</h2>
-    <p class="text-light" style="margin-bottom: 1rem;">
-        Permanently delete your account and all associated data. This action cannot be undone.
-    </p>
-    <button id="delete-btn" class="btn-secondary" style="color: var(--danger); border-color: var(--danger);">
-        Delete My Account
-    </button>
+<section class="card">
+    <h2 style="color: var(--danger);">Danger Zone</h2>
+    <ul class="list-group">
+        <li class="list-item">
+            <div class="flex-1">
+                <div style="font-weight: 600;">Delete account</div>
+                <div class="text-light" style="font-size: 0.8rem;">Permanently remove your account and all data</div>
+            </div>
+            <button id="delete-btn" class="btn-primary"
+                style="background: var(--danger); font-size: 0.85rem; padding: 0.4rem 1rem;">
+                Delete
+            </button>
+        </li>
+    </ul>
 </section>
 
-<a href="{{ url_for('home') }}" class="back-link" style="margin-top:1rem;color:#666;display:inline-block;">← Back</a>
+<a href="{{ url_for('home') }}" class="back-link">← Back</a>
 
 <script>
     (function () {
@@ -122,14 +134,11 @@
 
         if (disconnectBtn) {
             disconnectBtn.addEventListener('click', async () => {
-                if (!confirm('Are you sure you want to disconnect your Stripe account? You will no longer receive payments.')) return;
+                if (!confirm('Disconnect Stripe? You will no longer receive payments.')) return;
                 try {
                     const res = await fetch('/account/disconnect-stripe', { method: 'POST' });
-                    if (res.ok) {
-                        location.reload();
-                    } else {
-                        alert('Failed to disconnect');
-                    }
+                    if (res.ok) location.reload();
+                    else alert('Failed to disconnect');
                 } catch (e) {
                     alert('Error disconnecting Stripe');
                 }
@@ -138,15 +147,11 @@
 
         if (deleteBtn) {
             deleteBtn.addEventListener('click', async () => {
-                if (!confirm('Are you sure you want to permanently delete your account? This cannot be undone.')) return;
-                if (!confirm('This will delete ALL your data. Are you really sure?')) return;
+                if (!confirm('Permanently delete your account? This cannot be undone.')) return;
+                if (!confirm('Are you really sure? All your data will be lost.')) return;
                 try {
                     const res = await fetch('/account/delete', { method: 'POST' });
-                    if (res.redirected) {
-                        window.location.href = res.url;
-                    } else {
-                        window.location.href = '/login';
-                    }
+                    window.location.href = res.redirected ? res.url : '/login';
                 } catch (e) {
                     alert('Error deleting account');
                 }
