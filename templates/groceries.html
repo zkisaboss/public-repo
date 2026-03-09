@@ -356,8 +356,13 @@
             const ids = $$("#groceryList li.selected").map(li => li.dataset.id);
             if (!ids.length) return;
             try {
-                await api("/groceries/pay", "POST", { item_ids: ids });
-                location.reload();
+                const data = await api("/groceries/pay", "POST", { item_ids: ids });
+                const url = data.checkout_url || data.checkoutUrl;
+                if (url) {
+                    window.location.href = url;
+                } else {
+                    alert("No checkout URL returned.");
+                }
             } catch (e) {
                 alert(e.message);
             }
