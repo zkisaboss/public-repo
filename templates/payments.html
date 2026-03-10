@@ -7,6 +7,28 @@
   <p class="subtitle">Complete transaction and payment history</p>
 </header>
 
+
+<section class="card" id="balance-summary-card">
+  <h2 style="margin-bottom: 1rem;">Balance Summary</h2>
+
+  <div class="flex-row" style="gap: 1rem; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 180px;">
+      <p style="color: var(--text-light); margin-bottom: 0.35rem;">You owe</p>
+      <p id="you-owe" style="font-size: 1.75rem; font-weight: 700; margin: 0;">$0.00</p>
+    </div>
+
+    <div style="flex: 1; min-width: 180px;">
+      <p style="color: var(--text-light); margin-bottom: 0.35rem;">You are owed</p>
+      <p id="you-are-owed" style="font-size: 1.75rem; font-weight: 700; margin: 0;">$0.00</p>
+    </div>
+
+    <div style="flex: 1; min-width: 180px;">
+      <p style="color: var(--text-light); margin-bottom: 0.35rem;">Net balance</p>
+      <p id="net-balance" style="font-size: 1.75rem; font-weight: 700; margin: 0;">$0.00</p>
+    </div>
+  </div>
+</section>
+
 <section class="card">
   <div class="flex-row items-center mb-1" style="gap: 0.75rem;">
     <input id="search" type="text" placeholder="Search transaction ID, user, or expense..." class="form-input flex-1"
@@ -56,6 +78,7 @@
 
 <script>
   const PAYMENTS_API = "/api/payments";
+  const PAYMENTS_SUMMARY_API = "/api/payments/summary";
   let payments = [];
 
   const bodyEl = document.getElementById("payments-body");
@@ -63,6 +86,10 @@
   const emptyEl = document.getElementById("empty-payments");
   const statusFilter = document.getElementById("status-filter");
   const searchInput = document.getElementById("search");
+  
+  const youOweEl = document.getElementById("you-owe");
+  const youAreOwedEl = document.getElementById("you-are-owed");
+  const netBalanceEl = document.getElementById("net-balance");
 
   function fmtDate(iso) {
     if (!iso) return "-";
@@ -140,6 +167,35 @@
     }
   }
 
+
+  async function loadBalanceSummary() {
+  try {
+    const res = await fetch(PAYMENTS_SUMMARY_API);
+    const data = await res.json();
+
+    if (!res.ok) {
+      console.error(data.error || "Failed to load balance summary");
+      return;
+    }
+
+    youOweEl.textContent = fmtMoney(data.youOwe || 0);
+    youAreOwedEl.textContent = fmtMoney(data.youAreOwed || 0);
+
+    const net = Number(data.netBalance || 0);
+    netBalanceEl.textContent = fmtMoney(net);
+
+    if (net > 0) {
+      netBalanceEl.style.color = "var(--success)";
+    } else if (net < 0) {
+      netBalanceEl.style.color = "var(--danger)";
+    } else {
+      netBalanceEl.style.color = "var(--text)";
+    }
+  } catch (err) {
+    console.error("Failed to load balance summary:", err);
+  }
+}
+
   async function loadPayments() {
     const res = await fetch(PAYMENTS_API);
     const data = await res.json();
@@ -155,6 +211,11 @@
   searchInput.addEventListener("input", render);
 
   loadPayments();
-  setInterval(loadPayments, 5000);
+  oadBalanceSummary();
+
+  setInterval(() => {
+    loadPayments();
+    loadBalanceSummary();
+  }, 5000);
 </script>
 {% endblock %}

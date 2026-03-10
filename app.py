@@ -1174,6 +1174,48 @@ def get_payments():
     return jsonify(result), 200
 
 
+@app.route("/api/payments/summary", methods=["GET"])
+@login_required
+def get_payments_summary():
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    expenses = Expense.query.filter_by(group_id=user.group_id).all()
+
+    you_owe = 0.0
+    you_are_owed = 0.0
+
+    for expense in expenses:
+        # find all splits for this expense
+        splits = expense.splits
+        if not splits:
+            continue
+
+        # is current user part of this expense?
+        current_user_split = next((s for s in splits if s.user_id == user.id), None)
+        if not current_user_split:
+            continue
+
+        # if current user paid, others owe them
+        if expense.paid_by_user_id == user.id:
+            for split in splits:
+                if split.user_id != user.id:
+                    you_are_owed += float(split.amount)
+
+        # if someone else paid, current user owes their split
+        else:
+            you_owe += float(current_user_split.amount)
+
+    net_balance = you_are_owed - you_owe
+
+    return jsonify({
+        "youOwe": round(you_owe, 2),
+        "youAreOwed": round(you_are_owed, 2),
+        "netBalance": round(net_balance, 2)
+    }), 200
+
+
 # =============================================================================
 # INIT
 # =============================================================================
