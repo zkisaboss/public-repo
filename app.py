@@ -1413,7 +1413,7 @@ def notifications_page():
         return redirect_response
     return render_template('notifications.html', group=user.group)
 
-@app.route('api/notifications', methods=['GET'])
+@app.route('/api/notifications', methods=['GET'])
 @login_required
 def get_notifications():
     user = get_current_user()
