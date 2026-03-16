@@ -120,9 +120,11 @@
     }
   }
 
-  async function autoAssignChore(choreId) {
+  async function autoAssignChore(choreId, completedByUserId) {
     const res = await fetch(`${API_BASE}/${choreId}/auto-assign`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ completedByUserId: completedByUserId ? parseInt(completedByUserId, 10) : null }),
     });
 
     if (res.ok) {
@@ -144,15 +146,6 @@ async function deleteChore(choreId) {
   }
 }
 
-  async function deleteChore(choreId) {
-    const res = await fetch(`${API_BASE}/${choreId}`, {
-      method: "DELETE",
-    });
-
-    if (res.ok) {
-      await fetchChores();
-    }
-  }
 
   /* ==================== Helper Functions ==================== */
 
@@ -282,7 +275,11 @@ async function deleteChore(choreId) {
       autoBtn.style.fontSize = "0.85rem";
       autoBtn.style.height = "32px";
       autoBtn.style.width = "100%";
-      autoBtn.onclick = () => autoAssignChore(chore.choreId);
+      const selectEl = document.getElementById(`complete-user-${chore.choreId}`);
+      autoBtn.onclick = () => {
+        const completedByUserId = selectEl ? selectEl.value : null;
+        autoAssignChore(chore.choreId, completedByUserId);
+      };
       actions.appendChild(autoBtn);
 
       const deleteBtn = document.createElement("button");
