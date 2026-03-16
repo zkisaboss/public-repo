@@ -114,6 +114,19 @@ class ChoreCompletion(db.Model):
     completed_at = db.Column(db.DateTime, default=datetime.utcnow)
     user = db.relationship('User', backref='chore_completions')
 
+class Notification(db.Model):
+    __tablename__ = 'notifications'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    group_is = db.Column(db.Integer, db.ForeignKey('group.id'), nullable=False)
+    type = db.Column(db.String(50), nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    message = db.Column(db.String(500), nullable=False)
+    is_read = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    related_id = db.Column(db.Integer, nullable=True)
+    user = relationship('User', backref='notifications')
+
 
 class Expense(db.Model):
     __tablename__ = 'expenses'
@@ -206,6 +219,18 @@ def inject_user():
 
 def require_group(user):
     return None if user.group_id else redirect(url_for('group'))
+
+def create_notification(user_id, group_id, notif_type, title, message, related_id=None):
+    notif = Notification(
+        user_id=user_id,
+        group_id=group_id,
+        type=notif_type,
+        title=title,
+        message=message,
+        related_id=related_id
+    )
+    db.session.add(notif)
+    return notif
 
 
 # =============================================================================
@@ -836,16 +861,43 @@ def complete_chore_route(chore_id):
 @login_required
 def auto_assign_chore_route(chore_id):
     user = get_current_user()
+    group_members = User.query.filter_by(group_id=user.group_id).all()
     if not user or not user.group_id:
         return jsonify({'error': 'Unauthorized'}), 401
     chore = Chore.query.filter_by(id=chore_id, group_id=user.group_id).first()
     if not chore:
         return jsonify({"error": "chore not found"}), 404
+    
+    data = request.get_json() or {}
+    completed_by_id = data.get("completedByUserID")
+    completing_user = None
+    if completed_by_id:
+        completing_user = User.query.filter_by(
+            id=completed_by_id, group_id=user.group_id
+        ).first()
+    if not completing_user:
+        completing_user = user
+
+    db.session.add(ChoreCompletion(user_id=completing_user.id, chore_id=chore.id))
+
     if chore.assignments:
         users = list(chore.assignments)
         users.append(users.pop(0))  # rotate: move first to end
         chore.assignments = users
+
     chore.completed = False
+
+    next_person = chore.assignments[0] if chore.assignments else None
+    group_members = User.query.filter_by(group_id=user.group_id).all()
+    for member in group_members:
+        create_notification(
+            user_id=member.id,
+            group_id=member.group_id,
+            notif_type="chore",
+            title="Chore Rotated 🧹",
+            message=f'"{chore.name}" was completed by {completing_user.email.split("@")[0]}' + (f' and is now assigned to {next_person.email.split("@")[0]}.' if next_person else '.'),
+            related_id=chore_id
+        )
     db.session.commit()
     return jsonify(chore_to_dict(chore))
 
@@ -860,12 +912,23 @@ def delete_chore(chore_id):
     chore = Chore.query.filter_by(id=chore_id, group_id=user.group_id).first()
     if not chore:
         return jsonify({"error": "Chore not found"}), 404
-
+    
+    chore_name = chore.name
     db.session.delete(chore)
+
+    group_members = User.query.filter_by(group_id=user.group_id).all()
+    for member in group_members:
+        create_notification(
+            user_id=member.id,
+            group_id=user.group_id,
+            notif_type="chore",
+            title="Chore Deleted 🧹",
+            message=f'"{chore_name}" was deleted by {user.email.split("@")[0]}.',
+            related_id=chore_id
+        )
+
     db.session.commit()
     return jsonify({"deleted": True})
-
-
 
 
 # =============================================================================
@@ -982,8 +1045,6 @@ def delete_expense(expense_id):
     db.session.delete(expense)
     db.session.commit()
     return jsonify({'success': True})
-
-
 
 
 @app.route('/api/expenses/<int:expense_id>/remind/<int:user_id>', methods=['POST'])
@@ -1339,6 +1400,64 @@ def delete_account():
 
 
 
+#=============================================================================
+# NOTIFICATION ROUTES
+#=============================================================================
+@app.route('/notifications')
+@login_required
+def notifications_page():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for('login'))
+    if redirect_response := require_group(user):
+        return redirect_response
+    return render_template('notifications.html', group=user.group)
+
+@app.route('api/notifications', methods=['GET'])
+@login_required
+def get_notifications():
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    notifs = Notification.query.filter_by(user_id=user.id).order_by(Notification.created_at.desc()).limit(50).all()
+    return jsonify([{
+        'id': n.id, 'type': n.type, 'title': n.title,
+        'message': n.message, 'is_read': n.is_read,
+        'related_id': n.related_id,
+        'created_at': n.created_at.isoformat()
+    } for n in notifs])
+
+@app.route('/api/notifications/unread-count', methods=['GET'])
+@login_required
+def get_unread_count():
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'count': 0})
+    count = Notification.query.filter_by(user_id=user.id, is_read=False).count()
+    return jsonify({'count': count})
+
+@app.route('/api/notificaitons/<int:notif_id>/read', methods=['POST'])
+@login_required
+def mark_notification_read(notif_id):
+    user = get_current_user()
+    notif = Notification.query.filter_by(id=notif_id, usre_id=user.id).first()
+    if not notif:
+        return jsonify({'error': 'Not found'}), 404
+    notif.is_read = True
+    db.session.commit()
+    return jsonify({'success': True})
+
+@app.route('/api/notifications/read-all', methods=['POST'])
+@login_required
+def mark_all_read():
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Unauthorized'}), 401
+    Notification.query.filter_by(user_id=user.id, is_read=False).update({'is_read': True})
+    db.session.commit()
+    return jsonify({'success': True})
+
+
 # =============================================================================
 # INIT
 # =============================================================================
@@ -1365,6 +1484,23 @@ with app.app_context():
                 "stripe_session_id VARCHAR(255) UNIQUE NOT NULL, "
                 "stripe_payment_intent_id VARCHAR(255), "
                 "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        try:
+            conn.execute(db.text(
+                "CREATE TABLE IF NOT EXISTS notifications ("
+                "id INTEGER PRIMARY KEY, "
+                "user_id INTEGER NOT NULL, "
+                "group_id INTEGER NOT NULL, "
+                "type VARCHAR(50) NOT NULL, "
+                "title VARCHAR(200) NOT NULL, "
+                "message VARCHAR(500) NOT NULL, "
+                "is_read BOOLEAN DEFAULT FALSE, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                "related_id INTEGER)"
             ))
             conn.commit()
         except Exception:
