@@ -77,6 +77,7 @@ class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
+    username = db.Column(db.String(50), nullable=True)
     password = db.Column(db.String(255), nullable=True)  # Nullable for OAuth users
     auth_provider = db.Column(db.String(20), default='email')  # 'email', 'google'
     group_id = db.Column(db.Integer, db.ForeignKey('groups.id'))
@@ -212,6 +213,11 @@ def get_current_user():
     return user
 
 
+def display_name(user):
+    """Return the user's display name: username if set, otherwise email prefix."""
+    return user.username if user.username else user.email.split('@')[0]
+
+
 @app.context_processor
 def inject_user():
     return dict(current_user=get_current_user())
@@ -321,8 +327,8 @@ def check_and_send_weekly_reminders():
 
                 success = send_expense_reminder_email(
                     debtor_email=debtor.email,
-                    debtor_name=debtor.email.split('@')[0],
-                    creditor_name=creditor.email.split('@')[0],
+                    debtor_name=display_name(debtor),
+                    creditor_name=display_name(creditor),
                     amount=split.amount,
                     description=expense.description
                 )
@@ -484,10 +490,17 @@ def auth_google():
             token, google_requests.Request(), GOOGLE_CLIENT_ID
         )
         email = idinfo['email'].strip().lower()
+        google_name = idinfo.get('name', '').strip()
         user = User.query.filter_by(email=email).first()
         if not user:
-            user = User(email=email, password=None, auth_provider='google')
+            user = User(
+                email=email, password=None, auth_provider='google',
+                username=google_name or email.split('@')[0]
+            )
             db.session.add(user)
+            db.session.commit()
+        elif not user.username and google_name:
+            user.username = google_name
             db.session.commit()
         session['user_id'] = user.id
         return redirect(url_for('home') if user.group_id else url_for('group'))
@@ -502,6 +515,7 @@ def register():
     if request.method == 'POST':
         email = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '')
+        username = request.form.get('username', '').strip()
         if not email or not password:
             flash('Email and password required')
             return render_template('register.html', google_client_id=GOOGLE_CLIENT_ID)
@@ -513,7 +527,12 @@ def register():
             session['user_id'] = existing_user.id
             return redirect(url_for('home') if existing_user.group_id else url_for('group'))
 
-        user = User(email=email, password=generate_password_hash(password), auth_provider='email')
+        user = User(
+            email=email,
+            password=generate_password_hash(password),
+            auth_provider='email',
+            username=username or None
+        )
         try:
             db.session.add(user)
             db.session.commit()
@@ -650,7 +669,24 @@ def account():
     user = get_current_user()
     if not user:
         return redirect(url_for('login'))
-    return render_template('account.html', user=user)
+    return render_template('account.html', user=user, display_name=display_name(user))
+
+
+@app.route('/account/update-username', methods=['POST'])
+@login_required
+def update_username():
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.get_json()
+    new_username = data.get('username', '').strip() if data else ''
+    if not new_username:
+        return jsonify({'error': 'Username is required'}), 400
+    if len(new_username) > 50:
+        return jsonify({'error': 'Username must be 50 characters or less'}), 400
+    user.username = new_username
+    db.session.commit()
+    return jsonify({'success': True, 'username': user.username})
 
 
 
@@ -779,10 +815,10 @@ def chore_to_dict(chore):
         "choreId": chore.id,
         "name": chore.name,
         "assignedUsers": [
-            {"user_id": u.id, "name": u.email.split('@')[0]} for u in chore.assignments
+            {"user_id": u.id, "name": display_name(u)} for u in chore.assignments
         ],
         "lastCompletedBy": [
-            {"user_id": c.user.id, "name": c.user.email.split('@')[0]}
+            {"user_id": c.user.id, "name": display_name(c.user)}
             for c in sorted(chore.completions, key=lambda x: x.completed_at, reverse=True)
         ],
         "createdBy": (
@@ -801,7 +837,7 @@ def get_users():
     if not user or not user.group_id:
         return jsonify([])
     group_users = User.query.filter_by(group_id=user.group_id).all()
-    return jsonify([{"user_id": u.id, "name": u.email.split('@')[0]} for u in group_users])
+    return jsonify([{"user_id": u.id, "name": display_name(u)} for u in group_users])
 
 
 @app.route("/api/chores", methods=["GET", "POST"])
@@ -951,10 +987,10 @@ def get_expenses():
         'description': e.description,
         'amount': float(e.amount),
         'date': e.date.isoformat(),
-        'paidBy': {'user_id': e.paid_by_user_id, 'name': e.paid_by.email.split('@')[0]},
+        'paidBy': {'user_id': e.paid_by_user_id, 'name': display_name(e.paid_by)},
         'splits': [{
             'user_id': s.user_id,
-            'user_name': s.user.email.split('@')[0],
+            'user_name': display_name(s.user),
             'percentage': float(s.percentage),
             'amount': float(s.amount)
         } for s in e.splits],
@@ -1070,8 +1106,8 @@ def send_expense_reminder(expense_id, user_id):
 
     success = send_expense_reminder_email(
         debtor_email=debtor.email,
-        debtor_name=debtor.email.split('@')[0],
-        creditor_name=creditor.email.split('@')[0],
+        debtor_name=display_name(debtor),
+        creditor_name=display_name(creditor),
         amount=split.amount,
         description=expense.description
     )
@@ -1083,7 +1119,7 @@ def send_expense_reminder(expense_id, user_id):
             reminder_type='manual'
         ))
         db.session.commit()
-        return jsonify({'success': True, 'message': f'Reminder sent to {debtor.email.split("@")[0]}'}), 200
+        return jsonify({'success': True, 'message': f'Reminder sent to {display_name(debtor)}'}), 200
 
     return jsonify({'error': 'Failed to send reminder'}), 500
 
@@ -1501,6 +1537,15 @@ with app.app_context():
                 "is_read BOOLEAN DEFAULT FALSE, "
                 "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
                 "related_id INTEGER)"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        # Add username column to users table (migration for existing databases)
+        try:
+            conn.execute(db.text(
+                "ALTER TABLE users ADD COLUMN username VARCHAR(50)"
             ))
             conn.commit()
         except Exception:

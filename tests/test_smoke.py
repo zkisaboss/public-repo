@@ -22,7 +22,8 @@ class TestAuth:
     def test_register_new_user(self, client):
         resp = client.post('/register', data={
             'email': 'new@test.com',
-            'password': 'password123'
+            'password': 'password123',
+            'username': 'newuser'
         })
         assert resp.status_code == 302  # Redirect to /group
 
@@ -86,6 +87,16 @@ class TestProtectedPages:
     def test_account_loads(self, auth_client):
         resp = auth_client.get('/account')
         assert resp.status_code == 200
+
+    def test_update_username(self, auth_client):
+        resp = auth_client.post('/account/update-username',
+            json={'username': 'myname'},
+            content_type='application/json'
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['success'] is True
+        assert data['username'] == 'myname'
 
 
 
