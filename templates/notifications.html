@@ -1,0 +1,143 @@
+{% extends 'base.html' %}
+{% block title %}Notifications{% endblock %}
+
+{% block content %}
+<header class="page-header" style="display:flex; justify-content:space-between; align-items:center;">
+    <div>
+        <h1>🔔 Notifications</h1>
+        <p class="subtitle">Activity across your household</p>
+    </div>
+    <button id="markAllBtn" class="btn-secondary">Mark all as read</button>
+</header>
+
+<div style="display:flex; gap:0.5rem; margin-bottom:1.5rem; flex-wrap:wrap;">
+    <button class="filter-btn active" data-filter="all">All</button>
+    <button class="filter-btn" data-filter="expense">💸 Expenses</button>
+    <button class="filter-btn" data-filter="chore">🧹 Chores</button>
+    <button class="filter-btn" data-filter="grocery">🛒 Groceries</button>
+    <button class="filter-btn" data-filter="payment">💳 Payments</button>
+</div>
+
+<div class="card" style="padding:0;">
+    <div id="notif-list"></div>
+    <p id="empty-state" style="display:none; text-align:center; color:#999; padding:3rem;">No notifications yet.</p>
+</div>
+
+<a href="{{ url_for('home') }}" class="back-link" style="margin-top:1rem; color:#666; display:inline-block;">← Back</a>
+
+<style>
+    .filter-btn {
+        padding: 0.4rem 1rem;
+        border-radius: 999px;
+        border: 1px solid #ddd;
+        background: #fff;
+        cursor: pointer;
+        font-size: 0.9rem;
+        transition: all 0.15s;
+    }
+    .filter-btn.active {
+        background: var(--primary);
+        color: #fff;
+        border-color: var(--primary);
+    }
+    .notif-item {
+        display: flex;
+        gap: 1rem;
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid #f0f0f0;
+        cursor: pointer;
+        transition: background 0.15s;
+        align-items: flex-start;
+    }
+    .notif-item:last-child { border-bottom: none; }
+    .notif-item:hover { background: #fafafa; }
+    .notif-item.unread { background: #fff8f0; }
+    .notif-item.unread:hover { background: #fff0e0; }
+    .notif-dot {
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: var(--primary);
+        margin-top: 6px;
+        flex-shrink: 0;
+    }
+    .notif-dot.read { background: transparent; }
+    .notif-title { font-weight: 600; font-size: 0.95rem; }
+    .notif-message { color: #666; font-size: 0.88rem; margin-top: 0.15rem; }
+    .notif-time { color: #aaa; font-size: 0.8rem; margin-top: 0.25rem; }
+    .type-icon { font-size: 1.3rem; flex-shrink: 0; }
+</style>
+
+<script>
+(function() {
+    let allNotifs = [];
+    let activeFilter = 'all';
+
+    const typeIcon = { expense: '💸', chore: '🧹', grocery: '🛒', payment: '💳' };
+
+    function timeAgo(iso) {
+        const diff = Math.floor((Date.now() - new Date(iso)) / 1000);
+        if (diff < 60) return 'just now';
+        if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+        if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+        return `${Math.floor(diff/86400)}d ago`;
+    }
+
+    function render() {
+        const list = document.getElementById('notif-list');
+        const empty = document.getElementById('empty-state');
+        const filtered = activeFilter === 'all' ? allNotifs : allNotifs.filter(n => n.type === activeFilter);
+
+        if (!filtered.length) {
+            list.innerHTML = '';
+            empty.style.display = 'block';
+            return;
+        }
+        empty.style.display = 'none';
+        list.innerHTML = filtered.map(n => `
+            <div class="notif-item ${n.is_read ? '' : 'unread'}" data-id="${n.id}" onclick="markRead(${n.id}, this)">
+                <span class="type-icon">${typeIcon[n.type] || '🔔'}</span>
+                <div style="flex:1;">
+                    <div class="notif-title">${n.title}</div>
+                    <div class="notif-message">${n.message}</div>
+                    <div class="notif-time">${timeAgo(n.created_at)}</div>
+                </div>
+                <div class="notif-dot ${n.is_read ? 'read' : ''}"></div>
+            </div>
+        `).join('');
+    }
+
+    window.markRead = function(id, el) {
+        const notif = allNotifs.find(n => n.id === id);
+        if (!notif || notif.is_read) return;
+        fetch(`/api/notifications/${id}/read`, { method: 'POST' })
+            .then(() => {
+                notif.is_read = true;
+                render();
+            });
+    };
+
+    document.getElementById('markAllBtn').addEventListener('click', function() {
+        fetch('/api/notifications/read-all', { method: 'POST' })
+            .then(() => {
+                allNotifs.forEach(n => n.is_read = true);
+                render();
+                const badge = document.getElementById('notif-badge');
+                if (badge) badge.style.display = 'none';
+            });
+    });
+
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            activeFilter = this.dataset.filter;
+            render();
+        });
+    });
+
+    fetch('/api/notifications')
+        .then(r => r.json())
+        .then(data => { allNotifs = data; render(); });
+})();
+</script>
+{% endblock %}
