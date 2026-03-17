@@ -1,11 +1,6 @@
-.env
-venv/
-__pycache__/
-*.pyc
-
-instance/household.db
 # Secrets
 .env
+cookies.txt
 
 # Python
 instance/
@@ -22,7 +17,7 @@ pip-delete-this-directory.txt
 # macOS
 .DS_Store
 
-# Databaset
+# Database
 *.db
 *.sqlite3
 
