@@ -6,7 +6,7 @@
 <!-- Page Header -->
 <header class="page-header">
   <h1>Household Chores</h1>
-  <p class="subtitle">Manage shared tasks and assignments</p>
+  <p class="subtitle">Manage shared household responsibilities and automatically rotate between roommates.</p>
 </header>
 
 <!-- Create Chore Form -->
@@ -277,6 +277,7 @@ async function deleteChore(choreId) {
       autoBtn.style.width = "100%";
       const selectEl = document.getElementById(`complete-user-${chore.choreId}`);
       autoBtn.onclick = () => {
+        const selectEl = document.getElementById(`complete-user-${chore.choreId}`)
         const completedByUserId = selectEl ? selectEl.value : null;
         autoAssignChore(chore.choreId, completedByUserId);
       };

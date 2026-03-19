@@ -118,7 +118,7 @@ class ChoreCompletion(db.Model):
 class Notification(db.Model):
     __tablename__ = 'notifications'
     id = db.Column(db.Integer, primary_key=True)
-    users_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
     type = db.Column(db.String(50), nullable=False)
     title = db.Column(db.String(200), nullable=False)
@@ -925,15 +925,18 @@ def auto_assign_chore_route(chore_id):
 
     next_person = chore.assignments[0] if chore.assignments else None
     group_members = User.query.filter_by(group_id=user.group_id).all()
-    for member in group_members:
-        create_notification(
-            user_id=member.id,
-            group_id=member.group_id,
-            notif_type="chore",
-            title="Chore Rotated 🧹",
-            message=f'"{chore.name}" was completed by {completing_user.email.split("@")[0]}' + (f' and is now assigned to {next_person.email.split("@")[0]}.' if next_person else '.'),
-            related_id=chore_id
-        )
+    try:
+        for member in group_members:
+            create_notification(
+                user_id=member.id,
+                group_id=member.group_id,
+                notif_type="chore",
+                title="Chore Rotated 🧹",
+                message=f'"{chore.name}" was completed by {completing_user.email.split("@")[0]}' + (f' and is now assigned to {next_person.email.split("@")[0]}.' if next_person else '.'),
+                related_id=chore_id
+            )
+    except Exception as e:
+        print(f"Notification error (non-fatal): {e}", file=sys.stderr)
     db.session.commit()
     return jsonify(chore_to_dict(chore))
 
@@ -953,15 +956,18 @@ def delete_chore(chore_id):
     db.session.delete(chore)
 
     group_members = User.query.filter_by(group_id=user.group_id).all()
-    for member in group_members:
-        create_notification(
-            user_id=member.id,
-            group_id=user.group_id,
-            notif_type="chore",
-            title="Chore Deleted 🧹",
-            message=f'"{chore_name}" was deleted by {user.email.split("@")[0]}.',
-            related_id=chore_id
-        )
+    try:
+        for member in group_members:
+            create_notification(
+                user_id=member.id,
+                group_id=user.group_id,
+                notif_type="chore",
+                title="Chore Deleted 🧹",
+                message=f'"{chore_name}" was deleted by {user.email.split("@")[0]}.',
+                related_id=chore_id
+            )
+    except Exception as e:
+        print(f"Notification error (non-fatal): {e}", file=sys.stderr)
 
     db.session.commit()
     return jsonify({"deleted": True})
