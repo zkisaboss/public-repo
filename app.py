@@ -1472,7 +1472,7 @@ def get_unread_count():
     count = Notification.query.filter_by(user_id=user.id, is_read=False).count()
     return jsonify({'count': count})
 
-@app.route('/api/notificaitons/<int:notif_id>/read', methods=['POST'])
+@app.route('/api/notifications/<int:notif_id>/read', methods=['POST'])
 @login_required
 def mark_notification_read(notif_id):
     user = get_current_user()
