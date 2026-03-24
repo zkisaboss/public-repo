@@ -17,7 +17,7 @@ from flask_mail import Mail, Message
 from sqlalchemy.orm import relationship
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash, check_password_hash
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 from dotenv import load_dotenv
 import anthropic
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -458,6 +458,37 @@ def ensure_jpeg_bytes(image_bytes):
     return buf.getvalue()
 
 
+def preprocess_receipt_image(image_bytes):
+    """Pre-process receipt image for better text recognition.
+
+    Applies grayscale, contrast enhancement, sharpening, and
+    upscaling (if needed) so the AI model can read text more accurately.
+    """
+    image = Image.open(io.BytesIO(image_bytes))
+
+    # Convert to grayscale to remove colour noise
+    image = ImageOps.grayscale(image)
+
+    # Upscale small images so text has enough pixel data
+    MIN_WIDTH = 1500
+    if image.width < MIN_WIDTH:
+        scale = MIN_WIDTH / image.width
+        new_size = (MIN_WIDTH, int(image.height * scale))
+        image = image.resize(new_size, Image.LANCZOS)
+
+    # Boost contrast to separate text from background
+    image = ImageEnhance.Contrast(image).enhance(1.8)
+
+    # Sharpen to define character edges
+    image = ImageEnhance.Sharpness(image).enhance(2.0)
+
+    # Convert back to RGB (required for JPEG) and save
+    image = image.convert('RGB')
+    buf = io.BytesIO()
+    image.save(buf, format='JPEG', quality=95)
+    return buf.getvalue()
+
+
 # =============================================================================
 # AUTH ROUTES
 # =============================================================================
@@ -689,6 +720,24 @@ def update_username():
     return jsonify({'success': True, 'username': user.username})
 
 
+@app.route('/account/update-email', methods=['POST'])
+@login_required
+def update_email():
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.get_json()
+    new_email = data.get('email', '').strip().lower() if data else ''
+    if not new_email or '@' not in new_email:
+        return jsonify({'error': 'A valid email is required'}), 400
+    if new_email == user.email:
+        return jsonify({'success': True, 'email': user.email})
+    existing = User.query.filter_by(email=new_email).first()
+    if existing:
+        return jsonify({'error': 'That email is already in use'}), 400
+    user.email = new_email
+    db.session.commit()
+    return jsonify({'success': True, 'email': user.email})
 
 
 # =============================================================================
@@ -706,6 +755,7 @@ def upload_receipt():
         if not image_bytes:
             return jsonify({'error': 'No image provided'}), 400
         image_bytes = ensure_jpeg_bytes(image_bytes)
+        image_bytes = preprocess_receipt_image(image_bytes)
         items = parse_receipt_with_claude(image_bytes)
         return jsonify({'items': items})
     except Exception as e:
