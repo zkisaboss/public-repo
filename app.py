@@ -17,7 +17,7 @@ from flask_mail import Mail, Message
 from sqlalchemy.orm import relationship
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash, check_password_hash
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 from dotenv import load_dotenv
 import anthropic
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -34,8 +34,8 @@ app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-producti
 
 # Database Configuration
 database_url = os.environ.get('POSTGRES_URL') or os.environ.get('DATABASE_URL')
-if not database_url:
-    raise ValueError("Missing POSTGRES_URL or DATABASE_URL environment variable")
+if not database_url or not database_url.startswith(('postgres', 'postgresql', 'sqlite')):
+    database_url = 'sqlite:///household.db'
 if database_url.startswith('postgres://'):
     database_url = database_url.replace('postgres://', 'postgresql://', 1)
 
@@ -77,9 +77,11 @@ class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
+    username = db.Column(db.String(50), nullable=True)
     password = db.Column(db.String(255), nullable=True)  # Nullable for OAuth users
     auth_provider = db.Column(db.String(20), default='email')  # 'email', 'google'
     group_id = db.Column(db.Integer, db.ForeignKey('groups.id'))
+    stripe_account_id = db.Column(db.String(255), nullable=True)  # Stripe Connect Express
     group = relationship('Group', backref='users')
 
 
@@ -112,6 +114,19 @@ class ChoreCompletion(db.Model):
     chore_id = db.Column(db.Integer, db.ForeignKey('chores.id'), nullable=False)
     completed_at = db.Column(db.DateTime, default=datetime.utcnow)
     user = db.relationship('User', backref='chore_completions')
+
+class Notification(db.Model):
+    __tablename__ = 'notifications'
+    id = db.Column(db.Integer, primary_key=True)
+    users_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
+    type = db.Column(db.String(50), nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    message = db.Column(db.String(500), nullable=False)
+    is_read = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    related_id = db.Column(db.Integer, nullable=True)
+    users = relationship('User', backref='notifications')
 
 
 class Expense(db.Model):
@@ -149,6 +164,7 @@ class ExpenseReminder(db.Model):
 
     expense = db.relationship('Expense', backref='reminders')
     split = db.relationship('ExpenseSplit', backref='reminders')
+
 
 
 class Payment(db.Model):
@@ -197,6 +213,11 @@ def get_current_user():
     return user
 
 
+def display_name(user):
+    """Return the user's display name: username if set, otherwise email prefix."""
+    return user.username if user.username else user.email.split('@')[0]
+
+
 @app.context_processor
 def inject_user():
     return dict(current_user=get_current_user())
@@ -204,6 +225,18 @@ def inject_user():
 
 def require_group(user):
     return None if user.group_id else redirect(url_for('group'))
+
+def create_notification(user_id, group_id, notif_type, title, message, related_id=None):
+    notif = Notification(
+        user_id=user_id,
+        group_id=group_id,
+        type=notif_type,
+        title=title,
+        message=message,
+        related_id=related_id
+    )
+    db.session.add(notif)
+    return notif
 
 
 # =============================================================================
@@ -294,8 +327,8 @@ def check_and_send_weekly_reminders():
 
                 success = send_expense_reminder_email(
                     debtor_email=debtor.email,
-                    debtor_name=debtor.email.split('@')[0],
-                    creditor_name=creditor.email.split('@')[0],
+                    debtor_name=display_name(debtor),
+                    creditor_name=display_name(creditor),
                     amount=split.amount,
                     description=expense.description
                 )
@@ -353,12 +386,9 @@ def parse_receipt_with_claude(image_bytes):
     Each item:
     - "name": item name only (exclude codes/quantities)
     - "amt": quantity (parse from EA/QTY/@, default 1)
-<<<<<<< HEAD
     - "price": line total (not unit price)
-=======
     - "unit_price": price per single unit
     - "price": line total (qty × unit_price)
->>>>>>> 3590173c9a9322bef6c883cae56ef7b2502bee5d
 
     Ignore tax/subtotals. JSON only.
     """
@@ -428,6 +458,37 @@ def ensure_jpeg_bytes(image_bytes):
     return buf.getvalue()
 
 
+def preprocess_receipt_image(image_bytes):
+    """Pre-process receipt image for better text recognition.
+
+    Applies grayscale, contrast enhancement, sharpening, and
+    upscaling (if needed) so the AI model can read text more accurately.
+    """
+    image = Image.open(io.BytesIO(image_bytes))
+
+    # Convert to grayscale to remove colour noise
+    image = ImageOps.grayscale(image)
+
+    # Upscale small images so text has enough pixel data
+    MIN_WIDTH = 1500
+    if image.width < MIN_WIDTH:
+        scale = MIN_WIDTH / image.width
+        new_size = (MIN_WIDTH, int(image.height * scale))
+        image = image.resize(new_size, Image.LANCZOS)
+
+    # Boost contrast to separate text from background
+    image = ImageEnhance.Contrast(image).enhance(1.8)
+
+    # Sharpen to define character edges
+    image = ImageEnhance.Sharpness(image).enhance(2.0)
+
+    # Convert back to RGB (required for JPEG) and save
+    image = image.convert('RGB')
+    buf = io.BytesIO()
+    image.save(buf, format='JPEG', quality=95)
+    return buf.getvalue()
+
+
 # =============================================================================
 # AUTH ROUTES
 # =============================================================================
@@ -460,10 +521,17 @@ def auth_google():
             token, google_requests.Request(), GOOGLE_CLIENT_ID
         )
         email = idinfo['email'].strip().lower()
+        google_name = idinfo.get('name', '').strip()
         user = User.query.filter_by(email=email).first()
         if not user:
-            user = User(email=email, password=None, auth_provider='google')
+            user = User(
+                email=email, password=None, auth_provider='google',
+                username=google_name or email.split('@')[0]
+            )
             db.session.add(user)
+            db.session.commit()
+        elif not user.username and google_name:
+            user.username = google_name
             db.session.commit()
         session['user_id'] = user.id
         return redirect(url_for('home') if user.group_id else url_for('group'))
@@ -478,6 +546,7 @@ def register():
     if request.method == 'POST':
         email = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '')
+        username = request.form.get('username', '').strip()
         if not email or not password:
             flash('Email and password required')
             return render_template('register.html', google_client_id=GOOGLE_CLIENT_ID)
@@ -489,7 +558,12 @@ def register():
             session['user_id'] = existing_user.id
             return redirect(url_for('home') if existing_user.group_id else url_for('group'))
 
-        user = User(email=email, password=generate_password_hash(password), auth_provider='email')
+        user = User(
+            email=email,
+            password=generate_password_hash(password),
+            auth_provider='email',
+            username=username or None
+        )
         try:
             db.session.add(user)
             db.session.commit()
@@ -620,15 +694,50 @@ def expenses():
     return render_template('expenses.html', group=user.group)
 
 
-@app.route('/payments')
+@app.route('/account')
 @login_required
-def payments():
+def account():
     user = get_current_user()
     if not user:
         return redirect(url_for('login'))
-    if redirect_response := require_group(user):
-        return redirect_response
-    return render_template('payments.html', group=user.group)
+    return render_template('account.html', user=user, display_name=display_name(user))
+
+
+@app.route('/account/update-username', methods=['POST'])
+@login_required
+def update_username():
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.get_json()
+    new_username = data.get('username', '').strip() if data else ''
+    if not new_username:
+        return jsonify({'error': 'Username is required'}), 400
+    if len(new_username) > 50:
+        return jsonify({'error': 'Username must be 50 characters or less'}), 400
+    user.username = new_username
+    db.session.commit()
+    return jsonify({'success': True, 'username': user.username})
+
+
+@app.route('/account/update-email', methods=['POST'])
+@login_required
+def update_email():
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.get_json()
+    new_email = data.get('email', '').strip().lower() if data else ''
+    if not new_email or '@' not in new_email:
+        return jsonify({'error': 'A valid email is required'}), 400
+    if new_email == user.email:
+        return jsonify({'success': True, 'email': user.email})
+    existing = User.query.filter_by(email=new_email).first()
+    if existing:
+        return jsonify({'error': 'That email is already in use'}), 400
+    user.email = new_email
+    db.session.commit()
+    return jsonify({'success': True, 'email': user.email})
 
 
 # =============================================================================
@@ -646,6 +755,7 @@ def upload_receipt():
         if not image_bytes:
             return jsonify({'error': 'No image provided'}), 400
         image_bytes = ensure_jpeg_bytes(image_bytes)
+        image_bytes = preprocess_receipt_image(image_bytes)
         items = parse_receipt_with_claude(image_bytes)
         return jsonify({'items': items})
     except Exception as e:
@@ -664,15 +774,38 @@ def add_grocery():
     name = data.get('name', '').strip()
     if not name:
         return jsonify({'error': 'Name required'}), 400
+    price = data.get('price')
+    quantity = data.get('quantity', 1)
+
+    # Check for existing item with same name and price
+    existing = GroceryItem.query.filter(
+        GroceryItem.group_id == user.group_id,
+        db.func.lower(GroceryItem.name) == name.lower(),
+        GroceryItem.purchased == False
+    ).first()
+
+    if existing and existing.price == price:
+        existing.quantity = (existing.quantity or 1) + (quantity or 1)
+        db.session.commit()
+        return jsonify({
+            'id': existing.id, 'name': existing.name,
+            'quantity': existing.quantity, 'price': existing.price,
+            'merged': True
+        })
+
     item = GroceryItem(
         name=name,
-        quantity=data.get('quantity', 1),
-        price=data.get('price'),
+        quantity=quantity,
+        price=price,
         group_id=user.group_id
     )
     db.session.add(item)
     db.session.commit()
-    return jsonify({'id': item.id, 'name': item.name, 'quantity': item.quantity, 'price': item.price})
+    return jsonify({
+        'id': item.id, 'name': item.name,
+        'quantity': item.quantity, 'price': item.price,
+        'merged': False
+    })
 
 
 @app.route('/groceries/bulk-add', methods=['POST'])
@@ -732,10 +865,10 @@ def chore_to_dict(chore):
         "choreId": chore.id,
         "name": chore.name,
         "assignedUsers": [
-            {"user_id": u.id, "name": u.email.split('@')[0]} for u in chore.assignments
+            {"user_id": u.id, "name": display_name(u)} for u in chore.assignments
         ],
         "lastCompletedBy": [
-            {"user_id": c.user.id, "name": c.user.email.split('@')[0]}
+            {"user_id": c.user.id, "name": display_name(c.user)}
             for c in sorted(chore.completions, key=lambda x: x.completed_at, reverse=True)
         ],
         "createdBy": (
@@ -754,7 +887,7 @@ def get_users():
     if not user or not user.group_id:
         return jsonify([])
     group_users = User.query.filter_by(group_id=user.group_id).all()
-    return jsonify([{"user_id": u.id, "name": u.email.split('@')[0]} for u in group_users])
+    return jsonify([{"user_id": u.id, "name": display_name(u)} for u in group_users])
 
 
 @app.route("/api/chores", methods=["GET", "POST"])
@@ -814,97 +947,74 @@ def complete_chore_route(chore_id):
 @login_required
 def auto_assign_chore_route(chore_id):
     user = get_current_user()
+    group_members = User.query.filter_by(group_id=user.group_id).all()
     if not user or not user.group_id:
         return jsonify({'error': 'Unauthorized'}), 401
     chore = Chore.query.filter_by(id=chore_id, group_id=user.group_id).first()
     if not chore:
         return jsonify({"error": "chore not found"}), 404
+    
+    data = request.get_json() or {}
+    completed_by_id = data.get("completedByUserID")
+    completing_user = None
+    if completed_by_id:
+        completing_user = User.query.filter_by(
+            id=completed_by_id, group_id=user.group_id
+        ).first()
+    if not completing_user:
+        completing_user = user
+
+    db.session.add(ChoreCompletion(user_id=completing_user.id, chore_id=chore.id))
+
     if chore.assignments:
         users = list(chore.assignments)
         users.append(users.pop(0))  # rotate: move first to end
         chore.assignments = users
+
     chore.completed = False
+
+    next_person = chore.assignments[0] if chore.assignments else None
+    group_members = User.query.filter_by(group_id=user.group_id).all()
+    for member in group_members:
+        create_notification(
+            user_id=member.id,
+            group_id=member.group_id,
+            notif_type="chore",
+            title="Chore Rotated 🧹",
+            message=f'"{chore.name}" was completed by {completing_user.email.split("@")[0]}' + (f' and is now assigned to {next_person.email.split("@")[0]}.' if next_person else '.'),
+            related_id=chore_id
+        )
     db.session.commit()
     return jsonify(chore_to_dict(chore))
 
 
-# =============================================================================
-# PAYMENTS / STRIPE ROUTES
-# =============================================================================
-
-@app.route("/payments/create-checkout-session", methods=["POST"])
+@app.route("/api/chores/<int:chore_id>", methods=["DELETE"])
 @login_required
-def create_checkout_session():
+def delete_chore(chore_id):
     user = get_current_user()
     if not user or not user.group_id:
-        flash("You must be in a group to pay.")
-        return redirect(url_for("payments"))
+        return jsonify({"error": "Unauthorized"}), 401
 
-    amount_cents = int(request.form.get("amount_cents", "500"))
-    base_url = os.environ.get("BASE_URL", request.host_url.rstrip("/"))
+    chore = Chore.query.filter_by(id=chore_id, group_id=user.group_id).first()
+    if not chore:
+        return jsonify({"error": "Chore not found"}), 404
+    
+    chore_name = chore.name
+    db.session.delete(chore)
 
-    checkout_session = stripe.checkout.Session.create(
-        mode="payment",
-        line_items=[{
-            "price_data": {
-                "currency": "usd",
-                "product_data": {"name": "RoomSync payment"},
-                "unit_amount": amount_cents,
-            },
-            "quantity": 1,
-        }],
-        success_url=f"{base_url}/payments/success?session_id={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{base_url}/payments/cancel",
-        metadata={"user_id": str(user.id), "group_id": str(user.group_id)},
-    )
-
-    p = Payment(
-        user_id=user.id,
-        group_id=user.group_id,
-        amount_cents=amount_cents,
-        currency="usd",
-        status="pending",
-        stripe_session_id=checkout_session.id
-    )
-    db.session.add(p)
-    db.session.commit()
-    return redirect(checkout_session.url, code=303)
-
-
-@app.route("/payments/success")
-@login_required
-def payments_success():
-    session_id = request.args.get("session_id")
-    return render_template("payment_success.html", session_id=session_id)
-
-
-@app.route("/payments/cancel")
-@login_required
-def payments_cancel():
-    return render_template("payment_cancel.html")
-
-
-@app.route("/payments/webhook", methods=["POST"])
-def stripe_webhook():
-    payload = request.get_data()
-    sig_header = request.headers.get("Stripe-Signature")
-    endpoint_secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
-    try:
-        event = stripe.Webhook.construct_event(
-            payload=payload, sig_header=sig_header, secret=endpoint_secret
+    group_members = User.query.filter_by(group_id=user.group_id).all()
+    for member in group_members:
+        create_notification(
+            user_id=member.id,
+            group_id=user.group_id,
+            notif_type="chore",
+            title="Chore Deleted 🧹",
+            message=f'"{chore_name}" was deleted by {user.email.split("@")[0]}.',
+            related_id=chore_id
         )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
 
-    if event["type"] == "checkout.session.completed":
-        s = event["data"]["object"]
-        p = Payment.query.filter_by(stripe_session_id=s["id"]).first()
-        if p:
-            p.status = "confirmed"
-            p.stripe_payment_intent_id = s.get("payment_intent")
-            db.session.commit()
-
-    return jsonify({"received": True}), 200
+    db.session.commit()
+    return jsonify({"deleted": True})
 
 
 # =============================================================================
@@ -927,10 +1037,10 @@ def get_expenses():
         'description': e.description,
         'amount': float(e.amount),
         'date': e.date.isoformat(),
-        'paidBy': {'user_id': e.paid_by_user_id, 'name': e.paid_by.email.split('@')[0]},
+        'paidBy': {'user_id': e.paid_by_user_id, 'name': display_name(e.paid_by)},
         'splits': [{
             'user_id': s.user_id,
-            'user_name': s.user.email.split('@')[0],
+            'user_name': display_name(s.user),
             'percentage': float(s.percentage),
             'amount': float(s.amount)
         } for s in e.splits],
@@ -1023,6 +1133,51 @@ def delete_expense(expense_id):
     return jsonify({'success': True})
 
 
+@app.route('/api/expenses/<int:expense_id>/remind/<int:user_id>', methods=['POST'])
+@login_required
+def send_expense_reminder(expense_id, user_id):
+    current_user = get_current_user()
+    if not current_user or not current_user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    expense = Expense.query.filter_by(id=expense_id, group_id=current_user.group_id).first()
+    if not expense:
+        return jsonify({'error': 'Expense not found'}), 404
+
+    split = ExpenseSplit.query.filter_by(expense_id=expense_id, user_id=user_id).first()
+    if not split:
+        return jsonify({'error': 'User not part of this expense'}), 404
+
+    if user_id == expense.paid_by_user_id:
+        return jsonify({'error': 'Cannot remind the person who paid'}), 400
+
+    debtor = db.session.get(User, user_id)
+    creditor = expense.paid_by
+
+    success = send_expense_reminder_email(
+        debtor_email=debtor.email,
+        debtor_name=display_name(debtor),
+        creditor_name=display_name(creditor),
+        amount=split.amount,
+        description=expense.description
+    )
+
+    if success:
+        db.session.add(ExpenseReminder(
+            expense_id=expense_id,
+            split_id=split.id,
+            reminder_type='manual'
+        ))
+        db.session.commit()
+        return jsonify({'success': True, 'message': f'Reminder sent to {display_name(debtor)}'}), 200
+
+    return jsonify({'error': 'Failed to send reminder'}), 500
+
+
+# =============================================================================
+# STRIPE / PAYMENT ROUTES
+# =============================================================================
+
 @app.route("/api/expenses/<int:expense_id>/pay", methods=["POST"])
 @login_required
 def pay_expense(expense_id):
@@ -1049,7 +1204,8 @@ def pay_expense(expense_id):
         return jsonify({"error": "You already paid this expense"}), 400
 
     try:
-        checkout_session = stripe.checkout.Session.create(
+        base_url = os.environ.get("BASE_URL", request.host_url.rstrip("/"))
+        session_params = dict(
             mode="payment",
             payment_method_types=["card"],
             line_items=[{
@@ -1063,15 +1219,24 @@ def pay_expense(expense_id):
                 },
                 "quantity": 1,
             }],
-            success_url=url_for("payments_success", _external=True)
-                        + "?session_id={CHECKOUT_SESSION_ID}",
-            cancel_url=url_for("payments_cancel", _external=True),
+            success_url=f"{base_url}/payments/success?redirect=expenses",
+            cancel_url=f"{base_url}/payments/cancel?redirect=expenses",
             metadata={
+                "type": "expense",
                 "expense_id": str(expense.id),
                 "user_id": str(user.id),
                 "group_id": str(user.group_id),
             },
         )
+
+        # Route payment to the expense creator's connected Stripe account
+        creditor = expense.paid_by
+        if creditor.stripe_account_id:
+            session_params["payment_intent_data"] = {
+                "transfer_data": {"destination": creditor.stripe_account_id}
+            }
+
+        checkout_session = stripe.checkout.Session.create(**session_params)
     except Exception as e:
         return jsonify({"error": f"Stripe error: {str(e)}"}), 500
 
@@ -1090,88 +1255,293 @@ def pay_expense(expense_id):
     return jsonify({
         "success": True,
         "checkout_url": checkout_session.url,
-        "payment": {
-            "payment_id": payment.id,
-            "expense_id": payment.expense_id,
-            "amount_cents": payment.amount_cents,
-            "status": payment.status,
-            "transaction_id": payment.stripe_session_id,
-            "created_at": payment.created_at.isoformat() if payment.created_at else None
-        }
     }), 201
 
 
-@app.route('/api/expenses/<int:expense_id>/remind/<int:user_id>', methods=['POST'])
+@app.route("/groceries/pay", methods=["POST"])
 @login_required
-def send_expense_reminder(expense_id, user_id):
-    current_user = get_current_user()
-    if not current_user or not current_user.group_id:
-        return jsonify({'error': 'Unauthorized'}), 401
-
-    expense = Expense.query.filter_by(id=expense_id, group_id=current_user.group_id).first()
-    if not expense:
-        return jsonify({'error': 'Expense not found'}), 404
-
-    split = ExpenseSplit.query.filter_by(expense_id=expense_id, user_id=user_id).first()
-    if not split:
-        return jsonify({'error': 'User not part of this expense'}), 404
-
-    if user_id == expense.paid_by_user_id:
-        return jsonify({'error': 'Cannot remind the person who paid'}), 400
-
-    debtor = db.session.get(User, user_id)
-    creditor = expense.paid_by
-
-    success = send_expense_reminder_email(
-        debtor_email=debtor.email,
-        debtor_name=debtor.email.split('@')[0],
-        creditor_name=creditor.email.split('@')[0],
-        amount=split.amount,
-        description=expense.description
-    )
-
-    if success:
-        db.session.add(ExpenseReminder(
-            expense_id=expense_id,
-            split_id=split.id,
-            reminder_type='manual'
-        ))
-        db.session.commit()
-        return jsonify({'success': True, 'message': f'Reminder sent to {debtor.email.split("@")[0]}'}), 200
-
-    return jsonify({'error': 'Failed to send reminder'}), 500
-
-
-@app.route("/api/payments", methods=["GET"])
-@login_required
-def get_payments():
+def pay_groceries():
     user = get_current_user()
     if not user or not user.group_id:
         return jsonify({"error": "Unauthorized"}), 401
 
-    all_payments = Payment.query.filter_by(group_id=user.group_id).order_by(
-        Payment.created_at.desc()
+    data = request.get_json()
+    item_ids = data.get("item_ids", [])
+    recipient_user_id = data.get("recipient_user_id")
+    if not item_ids:
+        return jsonify({"error": "No items selected"}), 400
+
+    # Validate recipient
+    recipient = None
+    if recipient_user_id:
+        recipient = User.query.filter_by(id=recipient_user_id, group_id=user.group_id).first()
+        if not recipient:
+            return jsonify({"error": "Invalid recipient"}), 400
+
+    items = GroceryItem.query.filter(
+        GroceryItem.id.in_(item_ids),
+        GroceryItem.group_id == user.group_id
     ).all()
 
-    result = []
-    for p in all_payments:
-        payer = db.session.get(User, p.user_id)
-        status = (p.status or "pending").lower()
-        if status in ("paid", "succeeded", "success"):
-            status = "completed"
-        result.append({
-            "payment_id": p.id,
-            "expense_id": p.expense_id,
-            "payer_user_id": p.user_id,
-            "payer_name": payer.email.split("@")[0] if payer else str(p.user_id),
-            "amount": (float(p.amount_cents) / 100.0) if p.amount_cents is not None else 0.0,
-            "currency": p.currency or "usd",
-            "status": status,
-            "transaction_id": p.stripe_session_id,
-            "created_at": p.created_at.isoformat() if p.created_at else None,
+    if not items:
+        return jsonify({"error": "No valid items found"}), 404
+
+    total_cents = 0
+    line_items = []
+    for item in items:
+        price = item.price or 0
+        qty = item.quantity or 1
+        item_total_cents = int(round(price * qty * 100))
+        if item_total_cents <= 0:
+            continue
+        total_cents += item_total_cents
+        line_items.append({
+            "price_data": {
+                "currency": "usd",
+                "product_data": {"name": item.name},
+                "unit_amount": int(round(price * 100)),
+            },
+            "quantity": qty,
         })
 
-    return jsonify(result), 200
+    if not line_items:
+        return jsonify({"error": "Selected items have no price"}), 400
+
+    try:
+        base_url = os.environ.get("BASE_URL", request.host_url.rstrip("/"))
+        session_params = dict(
+            mode="payment",
+            payment_method_types=["card"],
+            line_items=line_items,
+            success_url=f"{base_url}/payments/success?redirect=groceries",
+            cancel_url=f"{base_url}/payments/cancel?redirect=groceries",
+            metadata={
+                "type": "grocery",
+                "item_ids": ",".join(str(i) for i in item_ids),
+                "user_id": str(user.id),
+                "group_id": str(user.group_id),
+            },
+        )
+
+        # Route payment to recipient's connected Stripe account
+        if recipient and recipient.stripe_account_id:
+            session_params["payment_intent_data"] = {
+                "transfer_data": {"destination": recipient.stripe_account_id}
+            }
+
+        checkout_session = stripe.checkout.Session.create(**session_params)
+    except Exception as e:
+        return jsonify({"error": f"Stripe error: {str(e)}"}), 500
+
+    payment = Payment(
+        user_id=user.id,
+        group_id=user.group_id,
+        amount_cents=total_cents,
+        currency="usd",
+        status="pending",
+        stripe_session_id=checkout_session.id,
+    )
+    db.session.add(payment)
+    db.session.commit()
+
+    return jsonify({"success": True, "checkout_url": checkout_session.url}), 201
+
+
+@app.route("/payments/success")
+@login_required
+def payments_success():
+    redirect_to = request.args.get("redirect", "home")
+    flash("Payment successful!")
+    return redirect(url_for(redirect_to))
+
+
+@app.route("/payments/cancel")
+@login_required
+def payments_cancel():
+    redirect_to = request.args.get("redirect", "home")
+    flash("Payment was cancelled.")
+    return redirect(url_for(redirect_to))
+
+
+@app.route("/payments/webhook", methods=["POST"])
+def stripe_webhook():
+    payload = request.get_data()
+    sig_header = request.headers.get("Stripe-Signature")
+    endpoint_secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
+    try:
+        event = stripe.Webhook.construct_event(
+            payload=payload, sig_header=sig_header, secret=endpoint_secret
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+    if event["type"] == "checkout.session.completed":
+        s = event["data"]["object"]
+        p = Payment.query.filter_by(stripe_session_id=s["id"]).first()
+        if p:
+            p.status = "completed"
+            p.stripe_payment_intent_id = s.get("payment_intent")
+            db.session.commit()
+
+            # If grocery payment, mark items as purchased
+            metadata = s.get("metadata", {})
+            if metadata.get("type") == "grocery" and metadata.get("item_ids"):
+                item_ids = [int(x) for x in metadata["item_ids"].split(",")]
+                GroceryItem.query.filter(GroceryItem.id.in_(item_ids)).update(
+                    {"purchased": True}, synchronize_session="fetch"
+                )
+                db.session.commit()
+
+    return jsonify({"received": True}), 200
+
+
+# =============================================================================
+# ACCOUNT MANAGEMENT ROUTES
+# =============================================================================
+
+@app.route("/account/connect-stripe", methods=["POST"])
+@login_required
+def connect_stripe():
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    try:
+        # Create a Stripe Express connected account
+        acct = stripe.Account.create(
+            type="express",
+            email=user.email,
+            capabilities={
+                "card_payments": {"requested": True},
+                "transfers": {"requested": True},
+            },
+        )
+
+        user.stripe_account_id = acct.id
+        db.session.commit()
+
+        base_url = os.environ.get("BASE_URL", request.host_url.rstrip("/"))
+        link = stripe.AccountLink.create(
+            account=acct.id,
+            refresh_url=f"{base_url}/account/stripe-callback?refresh=1",
+            return_url=f"{base_url}/account/stripe-callback",
+            type="account_onboarding",
+        )
+        return jsonify({"url": link.url})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/account/stripe-callback")
+@login_required
+def stripe_callback():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for("login"))
+
+    if request.args.get("refresh"):
+        # User needs to restart onboarding
+        if user.stripe_account_id:
+            try:
+                base_url = os.environ.get("BASE_URL", request.host_url.rstrip("/"))
+                link = stripe.AccountLink.create(
+                    account=user.stripe_account_id,
+                    refresh_url=f"{base_url}/account/stripe-callback?refresh=1",
+                    return_url=f"{base_url}/account/stripe-callback",
+                    type="account_onboarding",
+                )
+                return redirect(link.url)
+            except Exception:
+                pass
+
+    flash("Stripe account connected successfully!")
+    return redirect(url_for("account"))
+
+
+@app.route("/account/disconnect-stripe", methods=["POST"])
+@login_required
+def disconnect_stripe():
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    user.stripe_account_id = None
+    db.session.commit()
+    return jsonify({"success": True})
+
+
+@app.route("/account/delete", methods=["POST"])
+@login_required
+def delete_account():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for("login"))
+
+    # Delete user's related data
+    db.session.delete(user)
+    db.session.commit()
+    session.clear()
+    flash("Your account has been deleted.")
+    return redirect(url_for("login"))
+
+
+
+#=============================================================================
+# NOTIFICATION ROUTES
+#=============================================================================
+@app.route('/notifications')
+@login_required
+def notifications_page():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for('login'))
+    if redirect_response := require_group(user):
+        return redirect_response
+    return render_template('notifications.html', group=user.group)
+
+@app.route('/api/notifications', methods=['GET'])
+@login_required
+def get_notifications():
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    notifs = Notification.query.filter_by(user_id=user.id).order_by(Notification.created_at.desc()).limit(50).all()
+    return jsonify([{
+        'id': n.id, 'type': n.type, 'title': n.title,
+        'message': n.message, 'is_read': n.is_read,
+        'related_id': n.related_id,
+        'created_at': n.created_at.isoformat()
+    } for n in notifs])
+
+@app.route('/api/notifications/unread-count', methods=['GET'])
+@login_required
+def get_unread_count():
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({'count': 0})
+    count = Notification.query.filter_by(user_id=user.id, is_read=False).count()
+    return jsonify({'count': count})
+
+@app.route('/api/notifications/<int:notif_id>/read', methods=['POST'])
+@login_required
+def mark_notification_read(notif_id):
+    user = get_current_user()
+    notif = Notification.query.filter_by(id=notif_id, user_id=user.id).first()
+    if not notif:
+        return jsonify({'error': 'Not found'}), 404
+    notif.is_read = True
+    db.session.commit()
+    return jsonify({'success': True})
+
+@app.route('/api/notifications/read-all', methods=['POST'])
+@login_required
+def mark_all_read():
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Unauthorized'}), 401
+    Notification.query.filter_by(user_id=user.id, is_read=False).update({'is_read': True})
+    db.session.commit()
+    return jsonify({'success': True})
 
 
 @app.route("/api/payments/summary", methods=["GET"])
@@ -1222,6 +1592,56 @@ def get_payments_summary():
 
 with app.app_context():
     db.create_all()
+    # Migrate: add new columns to existing tables if missing
+    with db.engine.connect() as conn:
+        try:
+            conn.execute(db.text("ALTER TABLE users ADD COLUMN stripe_account_id VARCHAR(255)"))
+            conn.commit()
+        except Exception:
+            conn.rollback()  # Column already exists
+        try:
+            conn.execute(db.text(
+                "CREATE TABLE IF NOT EXISTS payments ("
+                "id INTEGER PRIMARY KEY, "
+                "user_id INTEGER NOT NULL, "
+                "group_id INTEGER NOT NULL, "
+                "expense_id INTEGER, "
+                "amount_cents INTEGER NOT NULL, "
+                "currency VARCHAR(3) DEFAULT 'usd', "
+                "status VARCHAR(20) DEFAULT 'pending', "
+                "stripe_session_id VARCHAR(255) UNIQUE NOT NULL, "
+                "stripe_payment_intent_id VARCHAR(255), "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        try:
+            conn.execute(db.text(
+                "CREATE TABLE IF NOT EXISTS notifications ("
+                "id INTEGER PRIMARY KEY, "
+                "user_id INTEGER NOT NULL, "
+                "group_id INTEGER NOT NULL, "
+                "type VARCHAR(50) NOT NULL, "
+                "title VARCHAR(200) NOT NULL, "
+                "message VARCHAR(500) NOT NULL, "
+                "is_read BOOLEAN DEFAULT FALSE, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                "related_id INTEGER)"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        # Add username column to users table (migration for existing databases)
+        try:
+            conn.execute(db.text(
+                "ALTER TABLE users ADD COLUMN username VARCHAR(50)"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
