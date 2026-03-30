@@ -68,6 +68,35 @@
     </ul>
 </section>
 
+
+<!-- Group Members -->
+<section class="card">
+    <h2>Group Members</h2>
+
+    {% if members %}
+        {% for member in members %}
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <div>
+                    <strong>
+                        {{ member.username if member.username else member.email }}
+                    </strong>
+                    <div style="color:#666; font-size:0.85rem;">
+                        {{ member.email }}
+                    </div>
+                </div>
+
+                {% if is_admin and member.id != user.id %}
+                <form method="POST" action="{{ url_for('remove_member', user_id=member.id) }}">
+                    <button type="submit" class="btn-secondary">Remove</button>
+                </form>
+                {% endif %}
+            </div>
+        {% endfor %}
+    {% else %}
+        <p class="text-light">No members in this group.</p>
+    {% endif %}
+</section>
+
 <!-- Stripe Connect -->
 <section class="card">
     <h2>Stripe Connect</h2>

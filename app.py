@@ -238,6 +238,18 @@ def get_current_user():
     return user
 
 
+def is_group_admin(user):
+    if not user or not user.group_id:
+        return False
+
+    membership = GroupMember.query.filter_by(
+        group_id=user.group_id,
+        user_id=user.id,
+        role='admin'
+    ).first()
+
+    return membership is not None
+
 def display_name(user):
     """Return the user's display name: username if set, otherwise email prefix."""
     return user.username if user.username else user.email.split('@')[0]
@@ -680,6 +692,45 @@ def invite_to_group():
     return redirect(url_for('account'))
 
 
+@app.route('/group/remove-member/<int:user_id>', methods=['POST'])
+@login_required
+def remove_member(user_id):
+    current_user = get_current_user()
+    if not current_user or not current_user.group_id:
+        return redirect(url_for('group'))
+
+    if not is_group_admin(current_user):
+        flash('Only admins can remove members')
+        return redirect(url_for('account'))
+
+    if current_user.id == user_id:
+        flash('You cannot remove yourself')
+        return redirect(url_for('account'))
+
+    member = User.query.filter_by(id=user_id, group_id=current_user.group_id).first()
+    if not member:
+        flash('Member not found')
+        return redirect(url_for('account'))
+
+    membership = GroupMember.query.filter_by(
+        group_id=current_user.group_id,
+        user_id=member.id
+    ).first()
+
+    try:
+        member.group_id = None
+        if membership:
+            db.session.delete(membership)
+
+        db.session.commit()
+        flash(f'{display_name(member)} was removed from the group')
+    except Exception:
+        db.session.rollback()
+        flash('Failed to remove member')
+
+    return redirect(url_for('account'))
+
+
 def handle_create_group(user):
     name = request.form.get('name', '').strip()
     if not name:
@@ -804,7 +855,18 @@ def account():
     user = get_current_user()
     if not user:
         return redirect(url_for('login'))
-    return render_template('account.html', user=user, display_name=display_name(user))
+
+    members = []
+    if user.group_id:
+        members = User.query.filter_by(group_id=user.group_id).all()
+
+    return render_template(
+        'account.html',
+        user=user,
+        display_name=display_name(user),
+        members=members,
+        is_admin=is_group_admin(user)
+    )
 
 
 @app.route('/account/update-username', methods=['POST'])
