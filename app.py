@@ -98,6 +98,18 @@ class GroupMember(db.Model):
     group = db.relationship('Group', backref='members')
 
 
+class GroupInvite(db.Model):
+    __tablename__ = 'group_invites'
+
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), nullable=False)
+    group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
+    code = db.Column(db.String(10), nullable=False)
+    accepted = db.Column(db.Boolean, default=False)
+
+    group = db.relationship('Group', backref='invites')
+
+
 # Association table for chore assignments
 chore_assignments = db.Table('chore_assignments',
     db.Column('chore_id', db.Integer, db.ForeignKey('chores.id'), primary_key=True),
@@ -379,6 +391,21 @@ def check_and_send_weekly_reminders():
             conn.rollback()
 
 
+        try:
+            conn.execute(db.text(
+                "CREATE TABLE IF NOT EXISTS group_invites ("
+                "id INTEGER PRIMARY KEY, "
+                "email TEXT NOT NULL, "
+                "group_id INTEGER NOT NULL, "
+                "code TEXT NOT NULL, "
+                "accepted BOOLEAN DEFAULT FALSE"
+                ")"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+
 # =============================================================================
 # SCHEDULER
 # =============================================================================
@@ -628,6 +655,30 @@ def group():
             return handle_join_group(user)
     return render_template('group.html')
 
+@app.route('/group/invite', methods=['POST'])
+@login_required
+def invite_to_group():
+    user = get_current_user()
+    if not user or not user.group_id:
+        return redirect(url_for('group'))
+
+    email = request.form.get('email', '').strip().lower()
+    if not email:
+        flash('Email required')
+        return redirect(url_for('account'))
+
+    invite = GroupInvite(
+        email=email,
+        group_id=user.group_id,
+        code=secrets.token_hex(4).upper()
+    )
+
+    db.session.add(invite)
+    db.session.commit()
+
+    flash(f'Invite sent to {email}')
+    return redirect(url_for('account'))
+
 
 def handle_create_group(user):
     name = request.form.get('name', '').strip()
@@ -666,19 +717,25 @@ def handle_join_group(user):
         flash('Group code required')
         return render_template('group.html')
 
-    target_group = Group.query.filter_by(code=code).first()
-    if not target_group:
-        flash('Invalid code')
+    invite = GroupInvite.query.filter_by(code=code, accepted=False).first()
+
+    if not invite:
+        flash('Invalid or expired invite')
         return render_template('group.html')
+
+    target_group = invite.group
 
     try:
         user.group_id = target_group.id
+
 
         db.session.add(GroupMember(
             group_id=target_group.id,
             user_id=user.id,
             role='member'
         ))
+
+        invite.accepted = True
 
         db.session.commit()
         flash(f'Joined {target_group.name}!')
