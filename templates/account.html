@@ -7,6 +7,12 @@
     <p class="subtitle">{{ display_name }}</p>
 </header>
 
+
+<form method="POST" action="/group/invite">
+    <input type="email" name="email" placeholder="Invite by email" required>
+    <button type="submit">Send Invite</button>
+</form>
+
 <!-- Profile -->
 <section class="card">
     <h2>Profile</h2>
