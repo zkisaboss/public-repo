@@ -85,6 +85,31 @@ class User(db.Model):
     group = relationship('Group', backref='users')
 
 
+
+class GroupMember(db.Model):
+    __tablename__ = 'group_members'
+
+    id = db.Column(db.Integer, primary_key=True)
+    group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    role = db.Column(db.String(20), nullable=False, default='member')
+
+    user = db.relationship('User', backref='group_memberships')
+    group = db.relationship('Group', backref='members')
+
+
+class GroupInvite(db.Model):
+    __tablename__ = 'group_invites'
+
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), nullable=False)
+    group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
+    code = db.Column(db.String(10), nullable=False)
+    accepted = db.Column(db.Boolean, default=False)
+
+    group = db.relationship('Group', backref='invites')
+
+
 # Association table for chore assignments
 chore_assignments = db.Table('chore_assignments',
     db.Column('chore_id', db.Integer, db.ForeignKey('chores.id'), primary_key=True),
@@ -212,6 +237,18 @@ def get_current_user():
         session.clear()
     return user
 
+
+def is_group_admin(user):
+    if not user or not user.group_id:
+        return False
+
+    membership = GroupMember.query.filter_by(
+        group_id=user.group_id,
+        user_id=user.id,
+        role='admin'
+    ).first()
+
+    return membership is not None
 
 def display_name(user):
     """Return the user's display name: username if set, otherwise email prefix."""
@@ -350,6 +387,35 @@ def check_and_send_weekly_reminders():
             import traceback
             traceback.print_exc()
             db.session.rollback()
+
+
+        try:
+            conn.execute(db.text(
+                "CREATE TABLE IF NOT EXISTS group_members ("
+                "id INTEGER PRIMARY KEY, "
+                "group_id INTEGER NOT NULL, "
+                "user_id INTEGER NOT NULL, "
+                "role TEXT NOT NULL DEFAULT 'member'"
+                ")"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+
+        try:
+            conn.execute(db.text(
+                "CREATE TABLE IF NOT EXISTS group_invites ("
+                "id INTEGER PRIMARY KEY, "
+                "email TEXT NOT NULL, "
+                "group_id INTEGER NOT NULL, "
+                "code TEXT NOT NULL, "
+                "accepted BOOLEAN DEFAULT FALSE"
+                ")"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
 
 # =============================================================================
@@ -601,24 +667,97 @@ def group():
             return handle_join_group(user)
     return render_template('group.html')
 
+@app.route('/group/invite', methods=['POST'])
+@login_required
+def invite_to_group():
+    user = get_current_user()
+    if not user or not user.group_id:
+        return redirect(url_for('group'))
+
+    email = request.form.get('email', '').strip().lower()
+    if not email:
+        flash('Email required')
+        return redirect(url_for('account'))
+
+    invite = GroupInvite(
+        email=email,
+        group_id=user.group_id,
+        code=secrets.token_hex(4).upper()
+    )
+
+    db.session.add(invite)
+    db.session.commit()
+
+    flash(f'Invite sent to {email}')
+    return redirect(url_for('account'))
+
+
+@app.route('/group/remove-member/<int:user_id>', methods=['POST'])
+@login_required
+def remove_member(user_id):
+    current_user = get_current_user()
+    if not current_user or not current_user.group_id:
+        return redirect(url_for('group'))
+
+    if not is_group_admin(current_user):
+        flash('Only admins can remove members')
+        return redirect(url_for('account'))
+
+    if current_user.id == user_id:
+        flash('You cannot remove yourself')
+        return redirect(url_for('account'))
+
+    member = User.query.filter_by(id=user_id, group_id=current_user.group_id).first()
+    if not member:
+        flash('Member not found')
+        return redirect(url_for('account'))
+
+    membership = GroupMember.query.filter_by(
+        group_id=current_user.group_id,
+        user_id=member.id
+    ).first()
+
+    try:
+        member.group_id = None
+        if membership:
+            db.session.delete(membership)
+
+        db.session.commit()
+        flash(f'{display_name(member)} was removed from the group')
+    except Exception:
+        db.session.rollback()
+        flash('Failed to remove member')
+
+    return redirect(url_for('account'))
+
 
 def handle_create_group(user):
     name = request.form.get('name', '').strip()
     if not name:
         flash('Group name required')
         return render_template('group.html')
+
     for _ in range(5):
         code = secrets.token_hex(4).upper()
         new_group = Group(name=name, code=code)
         try:
             db.session.add(new_group)
             db.session.flush()
+
             user.group_id = new_group.id
+
+            db.session.add(GroupMember(
+                group_id=new_group.id,
+                user_id=user.id,
+                role='admin'
+            ))
+
             db.session.commit()
             flash(f'Group created! Code: {code}')
             return redirect(url_for('home'))
         except IntegrityError:
             db.session.rollback()
+
     flash('Failed to create group, try again')
     return render_template('group.html')
 
@@ -628,18 +767,34 @@ def handle_join_group(user):
     if not code:
         flash('Group code required')
         return render_template('group.html')
-    target_group = Group.query.filter_by(code=code).first()
-    if not target_group:
-        flash('Invalid code')
+
+    invite = GroupInvite.query.filter_by(code=code, accepted=False).first()
+
+    if not invite:
+        flash('Invalid or expired invite')
         return render_template('group.html')
+
+    target_group = invite.group
+
     try:
         user.group_id = target_group.id
+
+
+        db.session.add(GroupMember(
+            group_id=target_group.id,
+            user_id=user.id,
+            role='member'
+        ))
+
+        invite.accepted = True
+
         db.session.commit()
         flash(f'Joined {target_group.name}!')
         return redirect(url_for('home'))
     except Exception:
         db.session.rollback()
         flash('Failed to join group')
+
     return render_template('group.html')
 
 
@@ -700,7 +855,18 @@ def account():
     user = get_current_user()
     if not user:
         return redirect(url_for('login'))
-    return render_template('account.html', user=user, display_name=display_name(user))
+
+    members = []
+    if user.group_id:
+        members = User.query.filter_by(group_id=user.group_id).all()
+
+    return render_template(
+        'account.html',
+        user=user,
+        display_name=display_name(user),
+        members=members,
+        is_admin=is_group_admin(user)
+    )
 
 
 @app.route('/account/update-username', methods=['POST'])
@@ -1542,6 +1708,48 @@ def mark_all_read():
     Notification.query.filter_by(user_id=user.id, is_read=False).update({'is_read': True})
     db.session.commit()
     return jsonify({'success': True})
+
+
+@app.route("/api/payments/summary", methods=["GET"])
+@login_required
+def get_payments_summary():
+    user = get_current_user()
+    if not user or not user.group_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    expenses = Expense.query.filter_by(group_id=user.group_id).all()
+
+    you_owe = 0.0
+    you_are_owed = 0.0
+
+    for expense in expenses:
+        # find all splits for this expense
+        splits = expense.splits
+        if not splits:
+            continue
+
+        # is current user part of this expense?
+        current_user_split = next((s for s in splits if s.user_id == user.id), None)
+        if not current_user_split:
+            continue
+
+        # if current user paid, others owe them
+        if expense.paid_by_user_id == user.id:
+            for split in splits:
+                if split.user_id != user.id:
+                    you_are_owed += float(split.amount)
+
+        # if someone else paid, current user owes their split
+        else:
+            you_owe += float(current_user_split.amount)
+
+    net_balance = you_are_owed - you_owe
+
+    return jsonify({
+        "youOwe": round(you_owe, 2),
+        "youAreOwed": round(you_are_owed, 2),
+        "netBalance": round(net_balance, 2)
+    }), 200
 
 
 # =============================================================================
