@@ -85,6 +85,19 @@ class User(db.Model):
     group = relationship('Group', backref='users')
 
 
+
+class GroupMember(db.Model):
+    __tablename__ = 'group_members'
+
+    id = db.Column(db.Integer, primary_key=True)
+    group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    role = db.Column(db.String(20), nullable=False, default='member')
+
+    user = db.relationship('User', backref='group_memberships')
+    group = db.relationship('Group', backref='members')
+
+
 # Association table for chore assignments
 chore_assignments = db.Table('chore_assignments',
     db.Column('chore_id', db.Integer, db.ForeignKey('chores.id'), primary_key=True),
@@ -352,6 +365,20 @@ def check_and_send_weekly_reminders():
             db.session.rollback()
 
 
+        try:
+            conn.execute(db.text(
+                "CREATE TABLE IF NOT EXISTS group_members ("
+                "id INTEGER PRIMARY KEY, "
+                "group_id INTEGER NOT NULL, "
+                "user_id INTEGER NOT NULL, "
+                "role TEXT NOT NULL DEFAULT 'member'"
+                ")"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+
 # =============================================================================
 # SCHEDULER
 # =============================================================================
@@ -607,18 +634,28 @@ def handle_create_group(user):
     if not name:
         flash('Group name required')
         return render_template('group.html')
+
     for _ in range(5):
         code = secrets.token_hex(4).upper()
         new_group = Group(name=name, code=code)
         try:
             db.session.add(new_group)
             db.session.flush()
+
             user.group_id = new_group.id
+
+            db.session.add(GroupMember(
+                group_id=new_group.id,
+                user_id=user.id,
+                role='admin'
+            ))
+
             db.session.commit()
             flash(f'Group created! Code: {code}')
             return redirect(url_for('home'))
         except IntegrityError:
             db.session.rollback()
+
     flash('Failed to create group, try again')
     return render_template('group.html')
 
@@ -628,18 +665,28 @@ def handle_join_group(user):
     if not code:
         flash('Group code required')
         return render_template('group.html')
+
     target_group = Group.query.filter_by(code=code).first()
     if not target_group:
         flash('Invalid code')
         return render_template('group.html')
+
     try:
         user.group_id = target_group.id
+
+        db.session.add(GroupMember(
+            group_id=target_group.id,
+            user_id=user.id,
+            role='member'
+        ))
+
         db.session.commit()
         flash(f'Joined {target_group.name}!')
         return redirect(url_for('home'))
     except Exception:
         db.session.rollback()
         flash('Failed to join group')
+
     return render_template('group.html')
 
 
