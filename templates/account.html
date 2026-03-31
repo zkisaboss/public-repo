@@ -45,7 +45,29 @@
         </li>
         <li class="list-item">
             <div class="flex-1">Email</div>
-            <div style="font-weight: 600;">{{ user.email }}</div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span id="email-display" style="font-weight: 600;">{{ user.email }}</span>
+                <button id="edit-email-btn" class="btn-secondary"
+                    style="font-size: 0.75rem; padding: 0.2rem 0.6rem; border: none; cursor: pointer;">
+                    Edit
+                </button>
+            </div>
+        </li>
+        <li class="list-item" id="email-edit-row" style="display: none;">
+            <div class="flex-1">New email</div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <input type="email" id="email-input" maxlength="120"
+                    style="padding: 0.3rem 0.5rem; border-radius: 6px; border: 1px solid var(--border); font-size: 0.9rem; width: 180px;"
+                    value="{{ user.email }}">
+                <button id="save-email-btn" class="btn-primary"
+                    style="font-size: 0.75rem; padding: 0.2rem 0.6rem;">
+                    Save
+                </button>
+                <button id="cancel-email-btn" class="btn-secondary"
+                    style="font-size: 0.75rem; padding: 0.2rem 0.6rem; border: none; cursor: pointer;">
+                    Cancel
+                </button>
+            </div>
         </li>
         <li class="list-item">
             <div class="flex-1">Sign-in</div>
@@ -193,6 +215,59 @@
                 editRow.style.display = 'none';
                 editBtn.style.display = '';
                 usernameInput.value = usernameDisplay.textContent;
+            });
+        }
+
+        // Email editing
+        const editEmailBtn = document.getElementById('edit-email-btn');
+        const emailEditRow = document.getElementById('email-edit-row');
+        const emailDisplay = document.getElementById('email-display');
+        const emailInput = document.getElementById('email-input');
+        const saveEmailBtn = document.getElementById('save-email-btn');
+        const cancelEmailBtn = document.getElementById('cancel-email-btn');
+
+        if (editEmailBtn) {
+            editEmailBtn.addEventListener('click', () => {
+                emailEditRow.style.display = '';
+                editEmailBtn.style.display = 'none';
+                emailInput.focus();
+                emailInput.select();
+            });
+        }
+
+        if (cancelEmailBtn) {
+            cancelEmailBtn.addEventListener('click', () => {
+                emailEditRow.style.display = 'none';
+                editEmailBtn.style.display = '';
+                emailInput.value = emailDisplay.textContent;
+            });
+        }
+
+        if (saveEmailBtn) {
+            saveEmailBtn.addEventListener('click', async () => {
+                const newEmail = emailInput.value.trim();
+                if (!newEmail || !newEmail.includes('@')) { alert('Please enter a valid email'); return; }
+                saveEmailBtn.disabled = true;
+                saveEmailBtn.textContent = 'Saving…';
+                try {
+                    const res = await fetch('/account/update-email', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: newEmail })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        emailDisplay.textContent = data.email;
+                        emailEditRow.style.display = 'none';
+                        editEmailBtn.style.display = '';
+                    } else {
+                        alert(data.error || 'Failed to update email');
+                    }
+                } catch (e) {
+                    alert('Error updating email');
+                }
+                saveEmailBtn.disabled = false;
+                saveEmailBtn.textContent = 'Save';
             });
         }
 

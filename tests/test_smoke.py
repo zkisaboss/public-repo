@@ -98,6 +98,36 @@ class TestProtectedPages:
         assert data['success'] is True
         assert data['username'] == 'myname'
 
+    def test_update_email(self, auth_client):
+        resp = auth_client.post('/account/update-email',
+            json={'email': 'updated@test.com'},
+            content_type='application/json'
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['success'] is True
+        assert data['email'] == 'updated@test.com'
+
+    def test_update_email_duplicate(self, client):
+        # Register two users
+        client.post('/register', data={
+            'email': 'first@test.com', 'password': 'password123'
+        })
+        client.post('/register', data={
+            'email': 'second@test.com', 'password': 'password123'
+        })
+        # Login as second user
+        client.post('/login', data={
+            'email': 'second@test.com', 'password': 'password123'
+        })
+        # Try to change to first user's email
+        resp = client.post('/account/update-email',
+            json={'email': 'first@test.com'},
+            content_type='application/json'
+        )
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert 'already in use' in data['error']
 
 
 class TestUnauthenticatedRedirects:
