@@ -4,13 +4,45 @@
 {% block content %}
 <header class="page-header">
     <h1>Account</h1>
-    <p class="subtitle">{{ user.email }}</p>
+    <p class="subtitle">{{ display_name }}</p>
 </header>
+
+
+<form method="POST" action="/group/invite">
+    <input type="email" name="email" placeholder="Invite by email" required>
+    <button type="submit">Send Invite</button>
+</form>
 
 <!-- Profile -->
 <section class="card">
     <h2>Profile</h2>
     <ul class="list-group">
+        <li class="list-item">
+            <div class="flex-1">Username</div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span id="username-display" style="font-weight: 600;">{{ display_name }}</span>
+                <button id="edit-username-btn" class="btn-secondary"
+                    style="font-size: 0.75rem; padding: 0.2rem 0.6rem; border: none; cursor: pointer;">
+                    Edit
+                </button>
+            </div>
+        </li>
+        <li class="list-item" id="username-edit-row" style="display: none;">
+            <div class="flex-1">New username</div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <input type="text" id="username-input" maxlength="50"
+                    style="padding: 0.3rem 0.5rem; border-radius: 6px; border: 1px solid var(--border); font-size: 0.9rem; width: 140px;"
+                    value="{{ display_name }}">
+                <button id="save-username-btn" class="btn-primary"
+                    style="font-size: 0.75rem; padding: 0.2rem 0.6rem;">
+                    Save
+                </button>
+                <button id="cancel-username-btn" class="btn-secondary"
+                    style="font-size: 0.75rem; padding: 0.2rem 0.6rem; border: none; cursor: pointer;">
+                    Cancel
+                </button>
+            </div>
+        </li>
         <li class="list-item">
             <div class="flex-1">Email</div>
             <div style="font-weight: 600;">{{ user.email }}</div>
@@ -34,6 +66,35 @@
             {% endif %}
         </li>
     </ul>
+</section>
+
+
+<!-- Group Members -->
+<section class="card">
+    <h2>Group Members</h2>
+
+    {% if members %}
+        {% for member in members %}
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <div>
+                    <strong>
+                        {{ member.username if member.username else member.email }}
+                    </strong>
+                    <div style="color:#666; font-size:0.85rem;">
+                        {{ member.email }}
+                    </div>
+                </div>
+
+                {% if is_admin and member.id != user.id %}
+                <form method="POST" action="{{ url_for('remove_member', user_id=member.id) }}">
+                    <button type="submit" class="btn-secondary">Remove</button>
+                </form>
+                {% endif %}
+            </div>
+        {% endfor %}
+    {% else %}
+        <p class="text-light">No members in this group.</p>
+    {% endif %}
 </section>
 
 <!-- Stripe Connect -->
@@ -109,6 +170,60 @@
         const connectBtn = document.getElementById('connect-btn');
         const disconnectBtn = document.getElementById('disconnect-btn');
         const deleteBtn = document.getElementById('delete-btn');
+
+        // Username editing
+        const editBtn = document.getElementById('edit-username-btn');
+        const editRow = document.getElementById('username-edit-row');
+        const usernameDisplay = document.getElementById('username-display');
+        const usernameInput = document.getElementById('username-input');
+        const saveBtn = document.getElementById('save-username-btn');
+        const cancelBtn = document.getElementById('cancel-username-btn');
+
+        if (editBtn) {
+            editBtn.addEventListener('click', () => {
+                editRow.style.display = '';
+                editBtn.style.display = 'none';
+                usernameInput.focus();
+                usernameInput.select();
+            });
+        }
+
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => {
+                editRow.style.display = 'none';
+                editBtn.style.display = '';
+                usernameInput.value = usernameDisplay.textContent;
+            });
+        }
+
+        if (saveBtn) {
+            saveBtn.addEventListener('click', async () => {
+                const newName = usernameInput.value.trim();
+                if (!newName) { alert('Username cannot be empty'); return; }
+                saveBtn.disabled = true;
+                saveBtn.textContent = 'Saving…';
+                try {
+                    const res = await fetch('/account/update-username', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username: newName })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        usernameDisplay.textContent = data.username;
+                        document.querySelector('.subtitle').textContent = data.username;
+                        editRow.style.display = 'none';
+                        editBtn.style.display = '';
+                    } else {
+                        alert(data.error || 'Failed to update username');
+                    }
+                } catch (e) {
+                    alert('Error updating username');
+                }
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save';
+            });
+        }
 
         if (connectBtn) {
             connectBtn.addEventListener('click', async () => {
