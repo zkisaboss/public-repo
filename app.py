@@ -143,7 +143,7 @@ class ChoreCompletion(db.Model):
 class Notification(db.Model):
     __tablename__ = 'notifications'
     id = db.Column(db.Integer, primary_key=True)
-    users_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
     type = db.Column(db.String(50), nullable=False)
     title = db.Column(db.String(200), nullable=False)
@@ -389,35 +389,6 @@ def check_and_send_weekly_reminders():
             db.session.rollback()
 
 
-        try:
-            conn.execute(db.text(
-                "CREATE TABLE IF NOT EXISTS group_members ("
-                "id INTEGER PRIMARY KEY, "
-                "group_id INTEGER NOT NULL, "
-                "user_id INTEGER NOT NULL, "
-                "role TEXT NOT NULL DEFAULT 'member'"
-                ")"
-            ))
-            conn.commit()
-        except Exception:
-            conn.rollback()
-
-
-        try:
-            conn.execute(db.text(
-                "CREATE TABLE IF NOT EXISTS group_invites ("
-                "id INTEGER PRIMARY KEY, "
-                "email TEXT NOT NULL, "
-                "group_id INTEGER NOT NULL, "
-                "code TEXT NOT NULL, "
-                "accepted BOOLEAN DEFAULT FALSE"
-                ")"
-            ))
-            conn.commit()
-        except Exception:
-            conn.rollback()
-
-
 # =============================================================================
 # SCHEDULER
 # =============================================================================
@@ -620,9 +591,12 @@ def register():
             flash('Password must be at least 6 characters')
             return render_template('register.html', google_client_id=GOOGLE_CLIENT_ID)
         existing_user = User.query.filter_by(email=email).first()
-        if existing_user and existing_user.password and check_password_hash(existing_user.password, password):
-            session['user_id'] = existing_user.id
-            return redirect(url_for('home') if existing_user.group_id else url_for('group'))
+        if existing_user:
+            if existing_user.password and check_password_hash(existing_user.password, password):
+                session['user_id'] = existing_user.id
+                return redirect(url_for('home') if existing_user.group_id else url_for('group'))
+            flash('Email already exists')
+            return render_template('register.html', google_client_id=GOOGLE_CLIENT_ID)
 
         user = User(
             email=email,
@@ -855,18 +829,7 @@ def account():
     user = get_current_user()
     if not user:
         return redirect(url_for('login'))
-
-    members = []
-    if user.group_id:
-        members = User.query.filter_by(group_id=user.group_id).all()
-
-    return render_template(
-        'account.html',
-        user=user,
-        display_name=display_name(user),
-        members=members,
-        is_admin=is_group_admin(user)
-    )
+    return render_template('account.html', user=user, display_name=display_name(user))
 
 
 @app.route('/account/update-username', methods=['POST'])
@@ -1113,9 +1076,9 @@ def complete_chore_route(chore_id):
 @login_required
 def auto_assign_chore_route(chore_id):
     user = get_current_user()
-    group_members = User.query.filter_by(group_id=user.group_id).all()
     if not user or not user.group_id:
         return jsonify({'error': 'Unauthorized'}), 401
+    
     chore = Chore.query.filter_by(id=chore_id, group_id=user.group_id).first()
     if not chore:
         return jsonify({"error": "chore not found"}), 404
@@ -1134,22 +1097,25 @@ def auto_assign_chore_route(chore_id):
 
     if chore.assignments:
         users = list(chore.assignments)
-        users.append(users.pop(0))  # rotate: move first to end
+        users.append(users.pop(0))
         chore.assignments = users
 
     chore.completed = False
 
     next_person = chore.assignments[0] if chore.assignments else None
     group_members = User.query.filter_by(group_id=user.group_id).all()
-    for member in group_members:
-        create_notification(
-            user_id=member.id,
-            group_id=member.group_id,
-            notif_type="chore",
-            title="Chore Rotated 🧹",
-            message=f'"{chore.name}" was completed by {completing_user.email.split("@")[0]}' + (f' and is now assigned to {next_person.email.split("@")[0]}.' if next_person else '.'),
-            related_id=chore_id
-        )
+    try:
+        for member in group_members:
+            create_notification(
+                user_id=member.id,
+                group_id=member.group_id,
+                notif_type="chore",
+                title="Chore Rotated 🧹",
+                message=f'"{chore.name}" was completed by {display_name(completing_user)}' + (f' and is now assigned to {display_name(next_person)}.' if next_person else '.'),
+                related_id=chore_id
+            )
+    except Exception as e:
+        print(f"Notification error (non-fatal): {e}", file=sys.stderr)
     db.session.commit()
     return jsonify(chore_to_dict(chore))
 
@@ -1166,19 +1132,21 @@ def delete_chore(chore_id):
         return jsonify({"error": "Chore not found"}), 404
     
     chore_name = chore.name
-    db.session.delete(chore)
-
     group_members = User.query.filter_by(group_id=user.group_id).all()
-    for member in group_members:
-        create_notification(
-            user_id=member.id,
-            group_id=user.group_id,
-            notif_type="chore",
-            title="Chore Deleted 🧹",
-            message=f'"{chore_name}" was deleted by {user.email.split("@")[0]}.',
-            related_id=chore_id
-        )
+    try:
+        for member in group_members:
+            create_notification(
+                user_id=member.id,
+                group_id=user.group_id,
+                notif_type="chore",
+                title="Chore Deleted 🧹",
+                message=f'"{chore_name}" was deleted by {display_name(user)}.',
+                related_id=chore_id
+            )
+    except Exception as e:
+        print(f"Notification error (non-fatal): {e}", file=sys.stderr)
 
+    db.session.delete(chore)
     db.session.commit()
     return jsonify({"deleted": True})
 
@@ -1516,7 +1484,10 @@ def pay_groceries():
 @app.route("/payments/success")
 @login_required
 def payments_success():
+    VALID_REDIRECTS = {'home', 'expenses', 'groceries'}
     redirect_to = request.args.get("redirect", "home")
+    if redirect_to not in VALID_REDIRECTS:
+        redirect_to = "home"
     flash("Payment successful!")
     return redirect(url_for(redirect_to))
 
@@ -1524,7 +1495,10 @@ def payments_success():
 @app.route("/payments/cancel")
 @login_required
 def payments_cancel():
+    VALID_REDIRECTS = {'home', 'expenses', 'groceries'}
     redirect_to = request.args.get("redirect", "home")
+    if redirect_to not in VALID_REDIRECTS:
+        redirect_to = "home"
     flash("Payment was cancelled.")
     return redirect(url_for(redirect_to))
 
@@ -1642,6 +1616,8 @@ def delete_account():
     user = get_current_user()
     if not user:
         return redirect(url_for("login"))
+    
+    GroupMember.query.filter_by(user_id=user.id).delete()
 
     # Delete user's related data
     db.session.delete(user)
@@ -1719,6 +1695,12 @@ def get_payments_summary():
 
     expenses = Expense.query.filter_by(group_id=user.group_id).all()
 
+    completed_payments = {
+        (p.user_id, p.expense_id)
+        for p in Payment.query.filter_by(group_id=user.group_id, status="completed").all()
+        if p.expense_id is not None
+    }
+
     you_owe = 0.0
     you_are_owed = 0.0
 
@@ -1737,11 +1719,12 @@ def get_payments_summary():
         if expense.paid_by_user_id == user.id:
             for split in splits:
                 if split.user_id != user.id:
-                    you_are_owed += float(split.amount)
-
+                    if (split.user_id, expense.id) not in completed_payments:
+                        you_are_owed += float(split.amount)
         # if someone else paid, current user owes their split
         else:
-            you_owe += float(current_user_split.amount)
+            if (user.id, expense.id) not in completed_payments:
+                you_owe += float(current_user_split.amount)
 
     net_balance = you_are_owed - you_owe
 
