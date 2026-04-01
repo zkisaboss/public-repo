@@ -69,11 +69,15 @@
 
     const dropdownData = allUsers.map(u => ({ id: u.user_id, label: u.name }));
 
-    assignDropdown = new CustomDropdown(assignContainer, { // TODO: error when no other users
-      multiple: false,
-      placeholder: 'Select user...',
-      data: dropdownData
-    });
+    if (dropdownData.length === 0) {
+      assignContainer.innerHTML = '<p style="font-size:0.85rem;color:var(--muted);">No other members in group.</p>';
+    } else {
+      assignDropdown = new CustomDropdown(assignContainer, {
+        multiple: false,
+        placeholder: 'Select user...',
+        data: dropdownData
+      });
+    }
   }
 
   async function fetchChores() {
@@ -85,7 +89,7 @@
   async function createChore() {
     const name = nameInput.value.trim();
     const nextDueBy = dueInput.value || null;
-    const assignedUserIds = assignDropdown.getSelectedValues(); // TODO: error when dropdown is null
+    const assignedUserIds = assignDropdown ? assignDropdown.getSelectedValues() : [];
 
     if (!name) return;
 
@@ -98,7 +102,7 @@
     if (res.ok) {
       nameInput.value = "";
       dueInput.value = "";
-      assignDropdown.setValues([]);
+      if (assignDropdown) assignDropdown.setValues([]);
       await fetchChores();
     }
   }
@@ -115,21 +119,19 @@
       body: JSON.stringify({ completedByUserId: parseInt(completedByUserId, 10) }),
     });
 
-    if (res.ok) {
-      await fetchChores();
-    }
+    if (res.ok) await fetchChores();
   }
 
-  async function autoAssignChore(choreId, completedByUserId) {
+  async function autoAssignChore(choreId) {
+    const selectEl = document.getElementById(`complete-user-${choreId}`);
+    const completedByUserId = selectEl ? parseInt(selectEl.value, 10) || null : null;
     const res = await fetch(`${API_BASE}/${choreId}/auto-assign`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ completedByUserId: completedByUserId ? parseInt(completedByUserId, 10) : null }),
+      body: JSON.stringify({ completedByUserId }),
     });
 
-    if (res.ok) {
-      await fetchChores();
-    }
+    if (res.ok) await fetchChores();
   }
 
   
@@ -137,9 +139,10 @@ async function deleteChore(choreId) {
   if (!confirm("Delete this chore?")) return;
 
   const res = await fetch(`${API_BASE}/${choreId}`, { method: "DELETE" });
-  const data = await res.json();
+  let data = {};
+  try { data = await res.json(); } catch (_) {}
 
-  if (data.deleted) {
+  if (res.ok && data.deleted) {
     await fetchChores();
   } else {
     alert(data.error || "Failed to delete chore.");
@@ -265,8 +268,7 @@ async function deleteChore(choreId) {
 
       if (!chore.completed) {
         // Add user selection dropdown with complete button
-        const completionControls = createUserDropdown(chore.choreId, chore.assignedUsers);
-        actions.appendChild(completionControls);
+        actions.appendChild(createUserDropdown(chore.choreId, chore.assignedUsers));
       }
 
       const autoBtn = document.createElement("button");
@@ -275,12 +277,7 @@ async function deleteChore(choreId) {
       autoBtn.style.fontSize = "0.85rem";
       autoBtn.style.height = "32px";
       autoBtn.style.width = "100%";
-      const selectEl = document.getElementById(`complete-user-${chore.choreId}`);
-      autoBtn.onclick = () => {
-        const selectEl = document.getElementById(`complete-user-${chore.choreId}`)
-        const completedByUserId = selectEl ? selectEl.value : null;
-        autoAssignChore(chore.choreId, completedByUserId);
-      };
+      autoBtn.onclick = () => autoAssignChore(chore.choreId);
       actions.appendChild(autoBtn);
 
       const deleteBtn = document.createElement("button");
